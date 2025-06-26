@@ -1,0 +1,17 @@
+# Hysteria2 客户端配置
+server: hy2-1.694463.xyz:4489
+
+auth: dongtaiwang.com
+
+bandwidth:
+  up: 20 mbps
+  down: 100 mbps
+
+socks5:
+  listen: 127.0.0.1:1081
+
+http:
+  listen: 127.0.0.1:8081
+
+tls:
+  insecure: true

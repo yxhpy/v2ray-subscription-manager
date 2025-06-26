@@ -1,0 +1,51 @@
+# 编译输出
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+v2ray-tool
+v2ray-subscription-manager
+
+# 测试二进制文件，由'go test -c'构建
+*.test
+
+# 输出的二进制文件（如果名称不是.gitignore中的）
+*.out
+
+# Go 模块依赖
+/vendor/
+
+# 临时文件
+temp_*.json
+temp_*.yaml
+temp_*.yml
+
+# 配置文件（可能包含敏感信息）
+config.json
+*.conf
+
+# 日志文件
+*.log
+
+# IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试结果
+*_results.json
+*_results.txt
+*_test_results.*
+test_*.json
+test_*.txt
+
+# 运行时文件
+*.pid 
