@@ -543,7 +543,7 @@ func (pm *ProxyManager) StartProxy(node *Node) error {
 	pm.CurrentNode = node
 
 	// 设置进程组，便于管理
-	pm.V2RayProcess.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcAttributes(pm.V2RayProcess)
 
 	err = pm.V2RayProcess.Start()
 	if err != nil {

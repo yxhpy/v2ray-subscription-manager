@@ -136,14 +136,6 @@ func main() {
 			os.Exit(1)
 		}
 
-	case "test-many":
-		// 调用测试函数
-		testMain()
-
-	case "simple-test":
-		// 调用简单测试
-		simpleTest()
-
 	case "download-hysteria2":
 		fmt.Println("=== Hysteria2客户端自动下载器 ===")
 		if err := AutoDownloadHysteria2(); err != nil {
