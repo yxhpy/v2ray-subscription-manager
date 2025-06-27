@@ -1,0 +1,147 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 发布工作流规则
+
+## 项目结构
+- 主程序入口: [main.go](mdc:main.go)
+- 构建脚本: [build.sh](mdc:build.sh)
+- README文档: [README.md](mdc:README.md)
+- 发布说明: [RELEASE_NOTES.md](mdc:RELEASE_NOTES.md)
+- Go模块文件: [go.mod](mdc:go.mod)
+
+## 发布流程
+
+### 🤖 自动化操作
+
+#### 1. 更新文档（AI自动完成）
+- 更新 [README.md](mdc:README.md) 功能特性列表
+- 更新安装说明和使用示例
+- 更新版本信息
+- 添加最新修复的问题说明
+
+#### 2. 更新发布说明（AI自动完成）
+- 在 [RELEASE_NOTES.md](mdc:RELEASE_NOTES.md) 中添加新版本信息
+- 包含修复的问题列表
+- 包含新增功能
+- 包含性能改进
+- 包含已知问题
+
+#### 3. 自动提交代码
+```bash
+# 自动添加所有修改的文件
+git add .
+
+# 自动提交代码，使用语义化提交信息
+git commit -m "fix: 修复Hysteria2重复下载和临时文件清理问题
+
+- 添加全局互斥锁防止Hysteria2重复下载
+- 改进Windows路径兼容性，支持.exe扩展名
+- 完善Base64解码智能检测
+- 增强临时配置文件清理功能
+- 添加文件完整性验证和重试机制"
+
+# 自动推送到远程仓库
+git push origin main
+```
+
+#### 4. 自动创建Release标签
+```bash
+# 自动创建版本标签
+git tag -a v1.2.0 -m "Release v1.2.0: 修复Windows兼容性和并发问题"
+
+# 自动推送标签到远程
+git push origin v1.2.0
+```
+
+#### 5. 自动编译新版本
+```bash
+# 使用构建脚本自动编译所有平台版本
+chmod +x build.sh
+./build.sh
+
+# 自动编译各平台版本
+GOOS=windows GOARCH=amd64 go build -o bin/v2ray-subscription-manager-windows-amd64.exe .
+GOOS=linux GOARCH=amd64 go build -o bin/v2ray-subscription-manager-linux-amd64 .
+GOOS=darwin GOARCH=amd64 go build -o bin/v2ray-subscription-manager-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -o bin/v2ray-subscription-manager-darwin-arm64 .
+GOOS=linux GOARCH=arm64 go build -o bin/v2ray-subscription-manager-linux-arm64 .
+GOOS=windows GOARCH=arm64 go build -o bin/v2ray-subscription-manager-windows-arm64.exe .
+```
+
+### 👤 手动操作
+
+#### 6. 创建GitHub Release（用户手动完成）
+用户需要手动在GitHub上创建Release：
+
+1. **访问GitHub Release页面**
+   - 前往项目的GitHub页面
+   - 点击"Releases"标签
+   - 点击"Create a new release"
+
+2. **填写Release信息**
+   - Tag version: `v1.2.0`（使用已创建的标签）
+   - Release title: `v1.2.0 - Windows兼容性重大修复和智能解码系统`
+   - 复制AI生成的Release描述内容
+
+3. **上传编译文件**
+   - 上传 `bin/` 目录下的所有编译文件
+   - 创建压缩包并上传：
+   ```bash
+   cd bin
+   zip v2ray-subscription-manager-v1.2.0-windows-amd64.zip v2ray-subscription-manager-windows-amd64.exe
+   zip v2ray-subscription-manager-v1.2.0-linux-amd64.zip v2ray-subscription-manager-linux-amd64
+   zip v2ray-subscription-manager-v1.2.0-darwin-amd64.zip v2ray-subscription-manager-darwin-amd64
+   # ... 其他平台
+   ```
+
+4. **发布Release**
+   - 检查所有信息无误
+   - 点击"Publish release"
+
+#### 7. AI生成的Release内容模板
+AI会自动生成以下内容供用户使用：
+
+- **Release标题格式**: `v1.2.0 - Windows兼容性重大修复和智能解码系统`
+- **Release描述**: 包含主要修复、下载文件表格、升级说明、使用示例
+- **提交信息**: 语义化提交信息，详细说明所有修复内容
+- **标签信息**: 简洁的版本标签描述
+- **编译命令**: 所有平台的编译命令和压缩包创建命令
+
+## 版本号规则
+- 主版本号：重大架构变更或不兼容更新
+- 次版本号：新功能添加
+- 修订版本号：Bug修复和小改进
+
+## 提交信息规范
+- `feat:` 新功能
+- `fix:` Bug修复
+- `docs:` 文档更新
+- `style:` 代码格式化
+- `refactor:` 代码重构
+- `test:` 测试相关
+- `chore:` 构建过程或辅助工具的变动
+
+## 发布检查清单
+
+### 🤖 自动化检查清单
+- [ ] 所有代码修复已完成
+- [ ] [README.md](mdc:README.md) 已自动更新
+- [ ] [RELEASE_NOTES.md](mdc:RELEASE_NOTES.md) 已自动更新
+- [ ] 代码已自动提交到main分支
+- [ ] 版本标签已自动创建和推送
+- [ ] 所有平台二进制文件已自动编译
+- [ ] Release内容已生成并提供给用户
+
+### 👤 手动检查清单
+- [ ] 用户已在GitHub上创建Release
+- [ ] Release标题和描述已正确填写
+- [ ] 所有编译文件已上传到Release
+- [ ] Release已成功发布
+- [ ] 用户已验证下载链接可用
+
+### 📋 完整发布流程
+1. **AI自动执行**: 代码修复 → 文档更新 → 提交推送 → 标签创建 → 编译构建
+2. **用户手动执行**: GitHub Release创建 → 文件上传 → 发布确认

@@ -1,5 +1,106 @@
 # Release Notes
 
+## v1.2.0 - Windows兼容性重大修复和智能解码系统 (2025-01-XX)
+
+### 🔧 Windows兼容性重大修复
+
+#### Hysteria2并发下载修复
+- **问题**: 在高并发测试环境下，多个worker同时检测到Hysteria2未安装，导致重复下载和资源冲突
+- **解决方案**: 添加全局互斥锁`hysteria2DownloadMutex`，实现`SafeDownloadHysteria2()`方法
+- **影响**: 完全解决并发下载问题，确保只有一个进程执行下载操作
+
+#### Windows路径兼容性修复
+- **问题**: Windows下V2Ray和Hysteria2可执行文件缺少`.exe`扩展名，导致"executable file not found in %PATH%"错误
+- **解决方案**: 
+  - 修改`NewHysteria2Downloader()`自动添加`.exe`扩展名
+  - 改进`CheckHysteria2Installed()`支持检测和重命名已下载文件
+  - 修复`proxy.go`中V2Ray启动路径，Windows下使用`v2ray.exe`
+- **影响**: 完全解决Windows下的可执行文件路径问题
+
+#### PE文件验证系统
+- **问题**: 下载的Windows可执行文件报错`%1 is not a valid Win32 application`
+- **解决方案**: 添加`validateWindowsExecutable()`方法验证PE文件格式
+- **影响**: 确保下载的Windows可执行文件格式正确
+
+### 🧠 智能解码系统
+
+#### Base64智能检测
+- **问题**: 订阅链接内容不是Base64编码时解码失败
+- **解决方案**: 重写`decodeBase64()`函数，智能检测内容是否为Base64编码
+- **特性**:
+  - 自动检测协议前缀（如`://`）
+  - 验证Base64字符集合法性
+  - 智能回退到原始内容
+- **影响**: 大幅提高订阅链接解析成功率
+
+### 🧹 完善的临时文件清理系统
+
+#### 跨平台清理策略
+- **问题**: Hysteria2临时配置文件在测试结束后未完全清理，特别是Windows环境
+- **解决方案**:
+  - 为每个Hysteria2实例生成唯一配置文件路径（纳秒时间戳）
+  - 实现`cleanupHysteria2TempFiles()`方法
+  - 添加`cleanupWindowsHysteria2Files()`处理Windows文件锁
+  - 支持多种文件名模式匹配
+
+#### Windows文件锁处理
+- **特性**: 
+  - 多次重试删除机制（最多3次）
+  - 文件句柄释放等待
+  - 智能临时文件识别
+- **影响**: 解决Windows下文件锁定导致的清理失败问题
+
+### 🔄 下载重试机制
+
+#### 文件完整性验证
+- **新增**: 文件大小验证和完整性检查
+- **新增**: 下载失败时自动重试（最多3次）
+- **准备**: 多下载源支持框架
+- **影响**: 提高下载成功率和文件可靠性
+
+### 🐛 修复的问题
+
+#### 高优先级修复
+- ✅ 修复Hysteria2重复下载导致的资源冲突
+- ✅ 修复Windows下可执行文件路径问题
+- ✅ 修复Base64解码失败导致的订阅解析错误
+- ✅ 修复临时配置文件清理不完全的问题
+- ✅ 修复Windows PE文件验证问题
+
+#### 稳定性改进
+- ✅ 增强并发安全性，防止竞态条件
+- ✅ 改进错误处理和日志输出
+- ✅ 优化资源管理和清理流程
+- ✅ 增强跨平台兼容性
+
+### 📈 性能改进
+- **并发安全**: 消除竞态条件，提高并发测试稳定性
+- **资源管理**: 更完善的临时文件清理，减少磁盘占用
+- **错误恢复**: 增强的重试机制，提高操作成功率
+
+### 🔧 使用改进
+```bash
+# 现在可以在Windows下正常使用所有功能
+v2ray-subscription-manager.exe speed-test https://your-subscription-url
+
+# 支持非Base64编码的订阅链接
+v2ray-subscription-manager parse https://plain-text-subscription-url
+
+# 更好的并发测试体验
+v2ray-subscription-manager speed-test-custom https://your-subscription-url --concurrency=100
+```
+
+### 💔 破坏性变更
+- 无破坏性变更，完全向后兼容
+
+### 🎯 下个版本计划
+- VMess协议支持
+- Trojan协议支持
+- GUI界面开发
+- 更多下载源支持
+
+---
+
 ## v1.1.0 - 智能工作流系统和高性能测速引擎 (2025-06-27)
 
 ### 🚀 重大新特性

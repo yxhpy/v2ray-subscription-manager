@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -228,23 +229,155 @@ func (w *SpeedTestWorkflow) deepCleanup() {
 	fmt.Printf("🧹 执行深度资源清理...\n")
 
 	// 清理所有可能的临时配置文件
-	exec.Command("find", ".", "-name", "temp_config_*.json", "-delete").Run()
-	exec.Command("rm", "-f", "hysteria2/config.yaml.tmp*").Run()
+	if runtime.GOOS != "windows" {
+		// Unix/Linux/macOS环境下的清理
+		exec.Command("find", ".", "-name", "temp_config_*.json", "-delete").Run()
+		exec.Command("find", ".", "-name", "config_*.yaml", "-delete").Run()
+		exec.Command("rm", "-f", "hysteria2/config.yaml.tmp*").Run()
+		exec.Command("rm", "-f", "hysteria2/config_*.yaml").Run()
 
-	// 强制清理所有可能占用的端口（轻量级检查）
-	for port := 10000; port < 20000; port += 100 {
-		// 只检查主要端口，不执行kill操作避免影响其他进程
-		exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port)).Run()
+		// 强制清理所有可能占用的端口（轻量级检查）
+		for port := 10000; port < 20000; port += 100 {
+			// 只检查主要端口，不执行kill操作避免影响其他进程
+			exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port)).Run()
+		}
+
+		// 最后一次强制清理进程
+		exec.Command("pkill", "-f", "v2ray").Run()
+		exec.Command("pkill", "-f", "hysteria").Run()
+
+		fmt.Printf("🧹 Unix环境清理完成\n")
+	} else {
+		// Windows环境下的清理
+		w.cleanupTempFilesWindows()
 	}
 
-	// 最后一次强制清理进程
-	exec.Command("pkill", "-f", "v2ray").Run()
-	exec.Command("pkill", "-f", "hysteria").Run()
+	// 跨平台通用清理
+	w.cleanupAdditionalTempFiles()
 
 	// 等待一下让进程完全退出
 	time.Sleep(2 * time.Second)
 
 	fmt.Printf("✅ 深度清理完成\n")
+}
+
+// cleanupTempFilesWindows Windows环境下的临时文件清理
+func (w *SpeedTestWorkflow) cleanupTempFilesWindows() {
+	fmt.Printf("🧹 Windows环境临时文件清理...\n")
+
+	// 清理V2Ray临时配置文件
+	files, err := filepath.Glob("temp_config_*.json")
+	if err == nil {
+		for _, file := range files {
+			if err := os.Remove(file); err == nil {
+				fmt.Printf("🧹 已清理V2Ray配置: %s\n", file)
+			}
+		}
+	}
+
+	// 调用专门的Hysteria2清理方法
+	w.cleanupWindowsHysteria2Files()
+
+	// 额外清理可能遗留的文件
+	w.cleanupAdditionalTempFiles()
+}
+
+// cleanupAdditionalTempFiles 清理额外的临时文件
+func (w *SpeedTestWorkflow) cleanupAdditionalTempFiles() {
+	// 清理可能的其他临时文件模式
+	patterns := []string{
+		"*.tmp",
+		"*.temp",
+		"config_*.json",
+		"temp_*.yaml",
+	}
+
+	for _, pattern := range patterns {
+		if files, err := filepath.Glob(pattern); err == nil {
+			for _, file := range files {
+				// 只删除明显是临时文件的
+				if strings.Contains(file, "temp") || strings.Contains(file, "tmp") {
+					if err := os.Remove(file); err == nil {
+						fmt.Printf("🧹 已清理临时文件: %s\n", file)
+					}
+				}
+			}
+		}
+	}
+}
+
+// cleanupHysteria2TempFiles 清理Hysteria2临时配置文件
+func (w *SpeedTestWorkflow) cleanupHysteria2TempFiles(manager *Hysteria2ProxyManager) {
+	if manager == nil {
+		return
+	}
+
+	// 清理管理器的配置文件
+	if manager.Downloader != nil && manager.Downloader.ConfigPath != "" {
+		configPath := manager.Downloader.ConfigPath
+		if err := os.Remove(configPath); err != nil {
+			// 忽略文件不存在的错误
+			if !os.IsNotExist(err) {
+				fmt.Printf("⚠️  清理Hysteria2配置文件失败 %s: %v\n", configPath, err)
+			}
+		} else {
+			fmt.Printf("🧹 已清理Hysteria2配置文件: %s\n", configPath)
+		}
+	}
+
+	// 清理可能的临时配置文件（使用多种模式匹配）
+	patterns := []string{
+		"./hysteria2/config_*.yaml",    // 新的命名模式
+		"./hysteria2/config.yaml.tmp*", // 可能的临时文件
+		"hysteria2/config_*.yaml",      // 无./前缀的模式
+		"hysteria2/config.yaml.tmp*",   // 无./前缀的临时文件
+	}
+
+	for _, pattern := range patterns {
+		files, err := filepath.Glob(pattern)
+		if err == nil {
+			for _, file := range files {
+				if err := os.Remove(file); err == nil {
+					fmt.Printf("🧹 已清理临时文件: %s\n", file)
+				}
+			}
+		}
+	}
+
+	// Windows特殊处理：强制清理可能被锁定的文件
+	if runtime.GOOS == "windows" {
+		w.cleanupWindowsHysteria2Files()
+	}
+}
+
+// cleanupWindowsHysteria2Files Windows下的特殊清理方法
+func (w *SpeedTestWorkflow) cleanupWindowsHysteria2Files() {
+	// 等待一小段时间，让文件句柄释放
+	time.Sleep(100 * time.Millisecond)
+
+	// 尝试清理hysteria2目录下的所有yaml文件
+	hysteria2Dir := "./hysteria2"
+	if _, err := os.Stat(hysteria2Dir); err == nil {
+		files, err := filepath.Glob(filepath.Join(hysteria2Dir, "*.yaml"))
+		if err == nil {
+			for _, file := range files {
+				// 检查文件是否包含临时标识
+				if strings.Contains(file, "config_") || strings.Contains(file, ".tmp") {
+					// 多次尝试删除，因为Windows可能有文件锁
+					for i := 0; i < 3; i++ {
+						if err := os.Remove(file); err == nil {
+							fmt.Printf("🧹 Windows清理成功: %s\n", file)
+							break
+						} else if i == 2 {
+							fmt.Printf("⚠️  Windows清理失败 %s: %v\n", file, err)
+						} else {
+							time.Sleep(50 * time.Millisecond)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // checkAndInstallDependencies 检查和安装必要依赖
@@ -455,10 +588,12 @@ func (w *SpeedTestWorkflow) testHysteria2Node(node *Node, result SpeedTestResult
 		// 从活跃管理器列表中移除
 		w.removeActiveManager(wrapper)
 		// 强制清理可能的残留进程
-		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.HTTPPort)).Run()
-		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.SOCKSPort)).Run()
-		// 清理可能的临时配置文件
-		exec.Command("rm", "-f", "hysteria2/config.yaml.tmp*").Run()
+		if runtime.GOOS != "windows" {
+			exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.HTTPPort)).Run()
+			exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.SOCKSPort)).Run()
+		}
+		// 清理临时配置文件
+		w.cleanupHysteria2TempFiles(tempHysteria2Manager)
 	}()
 
 	// 启动Hysteria2代理

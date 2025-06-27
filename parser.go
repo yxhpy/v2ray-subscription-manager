@@ -43,12 +43,46 @@ func fetchSubscription(url string) (string, error) {
 	return string(body), nil
 }
 
-// decodeBase64 解码base64内容
-func decodeBase64(encoded string) (string, error) {
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("base64解码失败: %v", err)
+// decodeBase64 智能解码base64内容
+func decodeBase64(content string) (string, error) {
+	// 去除空白字符
+	content = strings.TrimSpace(content)
+
+	// 检查是否看起来像base64编码
+	// base64字符集: A-Z, a-z, 0-9, +, /, =
+	isBase64Like := true
+	for _, char := range content {
+		if !((char >= 'A' && char <= 'Z') ||
+			(char >= 'a' && char <= 'z') ||
+			(char >= '0' && char <= '9') ||
+			char == '+' || char == '/' || char == '=' ||
+			char == '\n' || char == '\r' || char == ' ') {
+			isBase64Like = false
+			break
+		}
 	}
+
+	// 如果不像base64编码，或者内容包含协议前缀，直接返回原始内容
+	if !isBase64Like ||
+		strings.Contains(content, "://") ||
+		strings.HasPrefix(content, "vmess://") ||
+		strings.HasPrefix(content, "vless://") ||
+		strings.HasPrefix(content, "ss://") ||
+		strings.HasPrefix(content, "trojan://") ||
+		strings.HasPrefix(content, "hysteria2://") {
+		fmt.Printf("📄 内容不是base64编码，直接解析\n")
+		return content, nil
+	}
+
+	// 尝试base64解码
+	decoded, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		// 如果base64解码失败，返回原始内容
+		fmt.Printf("⚠️ base64解码失败，使用原始内容: %v\n", err)
+		return content, nil
+	}
+
+	fmt.Printf("✅ base64解码成功\n")
 	return string(decoded), nil
 }
 

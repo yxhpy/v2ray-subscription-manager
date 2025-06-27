@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -19,8 +20,12 @@ type Hysteria2ProxyManager struct {
 
 // NewHysteria2ProxyManager 创建新的Hysteria2代理管理器
 func NewHysteria2ProxyManager() *Hysteria2ProxyManager {
+	downloader := NewHysteria2Downloader()
+	// 为每个实例生成唯一的配置文件路径
+	downloader.ConfigPath = fmt.Sprintf("./hysteria2/config_%d.yaml", time.Now().UnixNano())
+
 	return &Hysteria2ProxyManager{
-		Downloader: NewHysteria2Downloader(),
+		Downloader: downloader,
 		HTTPPort:   8081, // 使用不同端口避免冲突
 		SOCKSPort:  1081,
 	}
@@ -35,7 +40,7 @@ func (h *Hysteria2ProxyManager) StartHysteria2Proxy(node *Node) error {
 	// 检查Hysteria2是否安装
 	if !h.Downloader.CheckHysteria2Installed() {
 		fmt.Println("🔽 Hysteria2未安装，正在自动下载...")
-		if err := h.Downloader.DownloadHysteria2(); err != nil {
+		if err := h.Downloader.SafeDownloadHysteria2(); err != nil {
 			return fmt.Errorf("自动下载Hysteria2失败: %v", err)
 		}
 	}
@@ -45,11 +50,15 @@ func (h *Hysteria2ProxyManager) StartHysteria2Proxy(node *Node) error {
 		h.StopHysteria2Proxy()
 	}
 
-	// 分配端口
-	h.HTTPPort = findAvailablePort(8081)
-	h.SOCKSPort = findAvailablePort(1081)
+	// 分配端口（如果还未设置）
+	if h.HTTPPort == 0 || h.HTTPPort == 8081 {
+		h.HTTPPort = findAvailablePort(8081)
+	}
+	if h.SOCKSPort == 0 || h.SOCKSPort == 1081 {
+		h.SOCKSPort = findAvailablePort(1081)
+	}
 
-	fmt.Printf("🔧 配置Hysteria2端口: HTTP=%d, SOCKS=%d\n", h.HTTPPort, h.SOCKSPort)
+	fmt.Printf("🔧 配置代理端口: HTTP=%d, SOCKS=%d\n", h.HTTPPort, h.SOCKSPort)
 
 	// 生成配置文件
 	if err := h.Downloader.GenerateHysteria2Config(node, h.HTTPPort, h.SOCKSPort); err != nil {
@@ -103,6 +112,11 @@ func (h *Hysteria2ProxyManager) StopHysteria2Proxy() error {
 	h.Process.Wait()
 	h.Process = nil
 	h.CurrentNode = nil
+
+	// 清理临时配置文件
+	if h.Downloader != nil && h.Downloader.ConfigPath != "./hysteria2/config.yaml" {
+		os.Remove(h.Downloader.ConfigPath)
+	}
 
 	fmt.Println("🛑 Hysteria2代理已停止")
 	return nil

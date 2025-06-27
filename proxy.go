@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -535,6 +536,10 @@ func (pm *ProxyManager) StartProxy(node *Node) error {
 
 	// 启动V2Ray
 	v2rayPath := "./v2ray/v2ray"
+	if runtime.GOOS == "windows" {
+		v2rayPath = "./v2ray/v2ray.exe"
+	}
+
 	if _, err := os.Stat(v2rayPath); os.IsNotExist(err) {
 		v2rayPath = "v2ray" // 尝试系统路径
 	}
@@ -653,6 +658,10 @@ func (pm *ProxyManager) isV2RayRunning() bool {
 // checkV2RayInstalled 检查V2Ray是否安装
 func (pm *ProxyManager) checkV2RayInstalled() bool {
 	paths := []string{"./v2ray/v2ray", "v2ray"}
+	if runtime.GOOS == "windows" {
+		paths = []string{"./v2ray/v2ray.exe", "v2ray"}
+	}
+
 	for _, path := range paths {
 		if _, err := os.Stat(path); err == nil {
 			return true
