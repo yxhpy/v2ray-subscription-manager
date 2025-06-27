@@ -12,12 +12,15 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/proxy"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/platform"
 	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
@@ -39,8 +42,15 @@ type ProxyServer struct {
 func NewProxyServer(configFile string, httpPort, socksPort int) *ProxyServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// 处理配置文件路径 - Windows 兼容性
+	absConfigFile, err := filepath.Abs(configFile)
+	if err != nil {
+		// 如果无法获取绝对路径，使用原路径
+		absConfigFile = configFile
+	}
+
 	return &ProxyServer{
-		configFile:       configFile,
+		configFile:       absConfigFile,
 		httpPort:         httpPort,
 		socksPort:        socksPort,
 		proxyManager:     proxy.NewProxyManager(),
@@ -69,6 +79,12 @@ func (ps *ProxyServer) Start() error {
 	if err := ps.loadConfig(); err != nil {
 		fmt.Printf("⚠️ 初始配置加载失败: %v\n", err)
 		fmt.Printf("⏳ 等待配置文件出现...\n")
+
+		// Windows 下立即启动轮询检查配置文件
+		if runtime.GOOS == "windows" {
+			fmt.Printf("🔄 启动轮询检查配置文件...\n")
+			go ps.pollConfigFile()
+		}
 	} else {
 		// 启动初始代理
 		if err := ps.startProxy(); err != nil {
@@ -79,6 +95,14 @@ func (ps *ProxyServer) Start() error {
 			fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", ps.httpPort)
 			fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", ps.socksPort)
 		}
+	}
+
+	// Windows 下无论如何都启动轮询作为备用方案
+	if runtime.GOOS == "windows" {
+		go ps.pollConfigFileAsBackup()
+
+		// 启动强制初始化检查
+		go ps.forceInitCheck()
 	}
 
 	fmt.Printf("👁️ 监控配置文件变化中...\n")
@@ -319,12 +343,34 @@ func (ps *ProxyServer) startFileWatcher() error {
 		return fmt.Errorf("创建文件监控器失败: %v", err)
 	}
 
+	// Windows 下使用绝对路径
+	configFile := ps.configFile
+	if runtime.GOOS == "windows" {
+		if absPath, err := filepath.Abs(ps.configFile); err == nil {
+			configFile = absPath
+			ps.configFile = absPath // 更新为绝对路径
+			fmt.Printf("📁 使用绝对路径: %s\n", configFile)
+		}
+	}
+
 	// 尝试监控配置文件，如果文件不存在则监控当前目录
-	err = ps.watcher.Add(ps.configFile)
+	err = ps.watcher.Add(configFile)
 	if err != nil {
 		// 如果文件不存在，监控当前目录来检测文件创建
 		fmt.Printf("📁 配置文件不存在，监控当前目录等待文件创建\n")
-		err = ps.watcher.Add(".")
+
+		// 获取配置文件所在目录
+		configDir := filepath.Dir(configFile)
+		if configDir == "" || configDir == "." {
+			if absDir, err := filepath.Abs("."); err == nil {
+				configDir = absDir
+			} else {
+				configDir = "."
+			}
+		}
+
+		fmt.Printf("📁 监控目录: %s\n", configDir)
+		err = ps.watcher.Add(configDir)
 		if err != nil {
 			return fmt.Errorf("添加目录监控失败: %v", err)
 		}
@@ -336,6 +382,106 @@ func (ps *ProxyServer) startFileWatcher() error {
 	return nil
 }
 
+// pollConfigFile Windows 下轮询检查配置文件（主要方案）
+func (ps *ProxyServer) pollConfigFile() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastModTime time.Time
+	var fileExists bool
+
+	for {
+		select {
+		case <-ticker.C:
+			if info, err := os.Stat(ps.configFile); err == nil {
+				// 文件存在
+				if !fileExists {
+					// 文件刚刚创建
+					fileExists = true
+					fmt.Printf("🔄 轮询检测到配置文件创建: %s\n", ps.configFile)
+					ps.handleConfigChange()
+				} else if info.ModTime().After(lastModTime) {
+					// 文件已修改
+					lastModTime = info.ModTime()
+					fmt.Printf("🔄 轮询检测到配置文件变化: %s\n", ps.configFile)
+					ps.handleConfigChange()
+				}
+				lastModTime = info.ModTime()
+			} else {
+				// 文件不存在
+				if fileExists {
+					fileExists = false
+					fmt.Printf("🔄 轮询检测到配置文件被删除: %s\n", ps.configFile)
+				}
+			}
+		case <-ps.ctx.Done():
+			return
+		}
+	}
+}
+
+// pollConfigFileAsBackup Windows 下轮询检查配置文件（备用方案）
+func (ps *ProxyServer) pollConfigFileAsBackup() {
+	// 等待一段时间再启动，避免与主轮询冲突
+	time.Sleep(10 * time.Second)
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var lastModTime time.Time
+
+	for {
+		select {
+		case <-ticker.C:
+			if info, err := os.Stat(ps.configFile); err == nil {
+				if info.ModTime().After(lastModTime) {
+					lastModTime = info.ModTime()
+					fmt.Printf("🔄 备用轮询检测到配置文件变化: %s\n", ps.configFile)
+					ps.handleConfigChange()
+				}
+			}
+		case <-ps.ctx.Done():
+			return
+		}
+	}
+}
+
+// forceInitCheck Windows 下强制初始化检查
+func (ps *ProxyServer) forceInitCheck() {
+	// 每5秒检查一次是否有配置文件但未启动代理
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// 检查是否有配置文件但没有当前节点
+			if _, err := os.Stat(ps.configFile); err == nil {
+				ps.mutex.RLock()
+				hasCurrentNode := ps.currentNode != nil
+				ps.mutex.RUnlock()
+
+				if !hasCurrentNode {
+					fmt.Printf("🔍 强制检查：发现配置文件但未加载，尝试加载...\n")
+					if loadErr := ps.loadConfig(); loadErr == nil {
+						if startErr := ps.startProxy(); startErr == nil {
+							fmt.Printf("🎉 强制检查：成功启动代理服务！\n")
+							fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", ps.httpPort)
+							fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", ps.socksPort)
+						} else {
+							fmt.Printf("❌ 强制检查：启动代理失败: %v\n", startErr)
+						}
+					} else {
+						fmt.Printf("❌ 强制检查：加载配置失败: %v\n", loadErr)
+					}
+				}
+			}
+		case <-ps.ctx.Done():
+			return
+		}
+	}
+}
+
 // watchFileChanges 监控文件变化
 func (ps *ProxyServer) watchFileChanges() {
 	for {
@@ -345,18 +491,38 @@ func (ps *ProxyServer) watchFileChanges() {
 				return
 			}
 
+			// Windows 下需要处理路径格式差异
+			eventPath := event.Name
+			if runtime.GOOS == "windows" {
+				eventPath = filepath.Clean(eventPath)
+			}
+
+			configPath := ps.configFile
+			if runtime.GOOS == "windows" {
+				configPath = filepath.Clean(configPath)
+			}
+
 			// 检查是否是我们关心的配置文件
-			if event.Name == ps.configFile {
+			if eventPath == configPath || filepath.Base(eventPath) == filepath.Base(configPath) {
 				// 处理写入和创建事件
 				if event.Op&fsnotify.Write == fsnotify.Write {
 					fmt.Printf("📝 检测到配置文件变化: %s\n", event.Name)
+					// Windows 下需要额外等待时间确保文件写入完成
+					if runtime.GOOS == "windows" {
+						time.Sleep(500 * time.Millisecond)
+					}
 					ps.handleConfigChange()
 				} else if event.Op&fsnotify.Create == fsnotify.Create {
 					fmt.Printf("📄 检测到配置文件创建: %s\n", event.Name)
 					// 文件创建后，尝试添加直接监控
-					ps.watcher.Remove(".")
+					configDir := filepath.Dir(ps.configFile)
+					ps.watcher.Remove(configDir)
 					if err := ps.watcher.Add(ps.configFile); err == nil {
 						fmt.Printf("✅ 已切换到直接监控配置文件\n")
+					}
+					// Windows 下需要额外等待时间
+					if runtime.GOOS == "windows" {
+						time.Sleep(1 * time.Second)
 					}
 					ps.handleConfigChange()
 				} else if event.Op&fsnotify.Remove == fsnotify.Remove {
@@ -364,7 +530,8 @@ func (ps *ProxyServer) watchFileChanges() {
 					fmt.Printf("⏳ 继续使用当前节点，等待配置文件恢复...\n")
 					// 切换回监控目录
 					ps.watcher.Remove(ps.configFile)
-					ps.watcher.Add(".")
+					configDir := filepath.Dir(ps.configFile)
+					ps.watcher.Add(configDir)
 				}
 			}
 
@@ -374,6 +541,12 @@ func (ps *ProxyServer) watchFileChanges() {
 			}
 			fmt.Printf("⚠️ 文件监控错误: %v\n", err)
 
+			// Windows 下如果文件监控出错，启用轮询备用方案
+			if runtime.GOOS == "windows" {
+				fmt.Printf("🔄 启用轮询备用方案...\n")
+				go ps.pollConfigFile()
+			}
+
 		case <-ps.ctx.Done():
 			return
 		}
@@ -382,13 +555,32 @@ func (ps *ProxyServer) watchFileChanges() {
 
 // handleConfigChange 处理配置文件变化
 func (ps *ProxyServer) handleConfigChange() {
-	// 等待一下，确保文件写入完成
-	time.Sleep(1 * time.Second)
+	// Windows 下需要更长的等待时间确保文件写入完成
+	waitTime := 1 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 2 * time.Second
+	}
+	time.Sleep(waitTime)
 
 	fmt.Printf("🔄 处理配置变化...\n")
 
-	// 加载新配置
-	data, err := os.ReadFile(ps.configFile)
+	// 多次尝试读取文件（Windows 下可能存在文件锁定问题）
+	var data []byte
+	var err error
+	maxRetries := 3
+
+	for i := 0; i < maxRetries; i++ {
+		data, err = os.ReadFile(ps.configFile)
+		if err == nil {
+			break
+		}
+
+		if i < maxRetries-1 {
+			fmt.Printf("⚠️ 读取配置文件失败 (尝试 %d/%d): %v\n", i+1, maxRetries, err)
+			time.Sleep(1 * time.Second)
+		}
+	}
+
 	if err != nil {
 		fmt.Printf("❌ 读取新配置失败: %v\n", err)
 		return
@@ -421,13 +613,48 @@ func (ps *ProxyServer) handleConfigChange() {
 		return
 	}
 
-	fmt.Printf("🔍 发现新节点，开始测试...\n")
+	fmt.Printf("🔍 发现新节点，开始切换...\n")
 	fmt.Printf("📡 新节点: %s (分数: %.2f)\n", newNode.Node.Name, newNode.Score)
 	if currentNode != nil {
 		fmt.Printf("📡 当前节点: %s (分数: %.2f)\n", currentNode.Node.Name, currentNode.Score)
 	}
 
-	// 测试新节点
+	// Windows 下直接应用新节点，跳过测试以避免复杂性
+	if runtime.GOOS == "windows" {
+		fmt.Printf("🪟 Windows 环境：直接应用新节点...\n")
+
+		// 先停止现有代理
+		fmt.Printf("🛑 停止现有代理...\n")
+		ps.stopProxy()
+
+		// 等待代理完全停止
+		time.Sleep(3 * time.Second)
+
+		ps.mutex.Lock()
+		ps.currentNode = newNode
+		ps.mutex.Unlock()
+
+		if err := ps.startProxy(); err != nil {
+			fmt.Printf("❌ 切换到新节点失败: %v\n", err)
+			// 回滚到原节点
+			if currentNode != nil {
+				fmt.Printf("🔄 回滚到原节点...\n")
+				ps.mutex.Lock()
+				ps.currentNode = currentNode
+				ps.mutex.Unlock()
+				if rollbackErr := ps.startProxy(); rollbackErr != nil {
+					fmt.Printf("❌ 回滚失败: %v\n", rollbackErr)
+				}
+			}
+		} else {
+			fmt.Printf("🎉 成功切换到新节点: %s\n", newNode.Node.Name)
+			fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", ps.httpPort)
+			fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", ps.socksPort)
+		}
+		return
+	}
+
+	// 非 Windows 环境继续使用测试机制
 	if ps.testNode(newNode.Node) {
 		fmt.Printf("✅ 新节点测试通过，开始切换...\n")
 
@@ -628,22 +855,50 @@ func (ps *ProxyServer) cleanupTempFiles() {
 
 // killRelatedProcesses 杀死相关进程
 func (ps *ProxyServer) killRelatedProcesses() {
-	processNames := []string{"v2ray", "xray", "hysteria2", "hysteria"}
+	fmt.Printf("    💀 终止相关进程...\n")
 
-	for _, processName := range processNames {
-		cmd := exec.Command("pkill", "-f", processName)
-		if err := cmd.Run(); err == nil {
-			fmt.Printf("    💀 已终止 %s 进程\n", processName)
+	// 首先尝试通过端口清理
+	ports := []int{ps.httpPort, ps.socksPort}
+	for _, port := range ports {
+		if err := platform.KillProcessByPort(port); err == nil {
+			fmt.Printf("      🔧 已终止占用端口 %d 的进程\n", port)
 		}
 	}
 
-	// 特别处理占用端口的进程
-	ports := []int{ps.httpPort, ps.socksPort}
+	// 然后按进程名清理
+	processNames := []string{"v2ray", "xray", "hysteria2", "hysteria"}
+
+	if runtime.GOOS == "windows" {
+		// Windows 使用taskkill
+		for _, processName := range processNames {
+			cmd := exec.Command("taskkill", "/F", "/IM", processName+".exe")
+			if err := cmd.Run(); err == nil {
+				fmt.Printf("      🔧 已终止 %s 进程\n", processName)
+			}
+		}
+	} else {
+		// Unix 使用pkill
+		for _, processName := range processNames {
+			cmd := exec.Command("pkill", "-f", processName)
+			if err := cmd.Run(); err == nil {
+				fmt.Printf("      🔧 已终止 %s 进程\n", processName)
+			}
+		}
+	}
+
+	// 特别处理占用端口的进程（备用方案）
 	for _, port := range ports {
 		if pid := ps.getProcessByPort(port); pid > 0 {
-			cmd := exec.Command("kill", "-9", fmt.Sprintf("%d", pid))
-			if err := cmd.Run(); err == nil {
-				fmt.Printf("    💀 已终止占用端口 %d 的进程 (PID: %d)\n", port, pid)
+			if runtime.GOOS == "windows" {
+				cmd := exec.Command("taskkill", "/F", "/PID", fmt.Sprintf("%d", pid))
+				if err := cmd.Run(); err == nil {
+					fmt.Printf("      🔧 已终止占用端口 %d 的进程 (PID: %d)\n", port, pid)
+				}
+			} else {
+				cmd := exec.Command("kill", "-9", fmt.Sprintf("%d", pid))
+				if err := cmd.Run(); err == nil {
+					fmt.Printf("      🔧 已终止占用端口 %d 的进程 (PID: %d)\n", port, pid)
+				}
 			}
 		}
 	}
@@ -651,15 +906,38 @@ func (ps *ProxyServer) killRelatedProcesses() {
 
 // getProcessByPort 获取占用指定端口的进程ID
 func (ps *ProxyServer) getProcessByPort(port int) int {
-	cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
+	if runtime.GOOS == "windows" {
+		// Windows 使用 netstat
+		cmd := exec.Command("netstat", "-ano", "-p", "tcp")
+		output, err := cmd.Output()
+		if err != nil {
+			return 0
+		}
 
-	var pid int
-	if _, err := fmt.Sscanf(string(output), "%d", &pid); err == nil {
-		return pid
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, fmt.Sprintf(":%d", port)) && strings.Contains(line, "LISTENING") {
+				fields := strings.Fields(line)
+				if len(fields) >= 5 {
+					var pid int
+					if _, err := fmt.Sscanf(fields[4], "%d", &pid); err == nil {
+						return pid
+					}
+				}
+			}
+		}
+	} else {
+		// Unix 使用 lsof
+		cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
+		output, err := cmd.Output()
+		if err != nil {
+			return 0
+		}
+
+		var pid int
+		if _, err := fmt.Sscanf(string(output), "%d", &pid); err == nil {
+			return pid
+		}
 	}
 
 	return 0

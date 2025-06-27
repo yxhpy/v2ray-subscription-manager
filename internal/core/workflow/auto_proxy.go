@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/downloader"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/platform"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/utils"
 	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
@@ -51,7 +53,7 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 	testerCtx, testerCancel := context.WithCancel(ctx)
 	serverCtx, serverCancel := context.WithCancel(ctx)
 
-	// 设置默认值
+	// 设置默认值 - 针对Windows进行优化
 	if config.HTTPPort == 0 {
 		config.HTTPPort = 7890
 	}
@@ -62,13 +64,28 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 		config.UpdateInterval = 10 * time.Minute
 	}
 	if config.TestConcurrency == 0 {
-		config.TestConcurrency = 20
+		// Windows环境使用更保守的并发数
+		if runtime.GOOS == "windows" {
+			config.TestConcurrency = 3 // Windows下降低并发数
+		} else {
+			config.TestConcurrency = 20
+		}
 	}
 	if config.TestTimeout == 0 {
-		config.TestTimeout = 30 * time.Second
+		// Windows环境使用更长的超时时间
+		if runtime.GOOS == "windows" {
+			config.TestTimeout = 60 * time.Second // Windows下增加超时时间
+		} else {
+			config.TestTimeout = 30 * time.Second
+		}
 	}
 	if config.TestURL == "" {
-		config.TestURL = "http://www.google.com"
+		// Windows环境优先使用国内可访问的URL
+		if runtime.GOOS == "windows" {
+			config.TestURL = "http://www.baidu.com" // Windows下优先使用百度
+		} else {
+			config.TestURL = "http://www.google.com"
+		}
 	}
 	if config.MinPassingNodes == 0 {
 		config.MinPassingNodes = 5
@@ -88,7 +105,13 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 	tester.SetStateFile(bestNodeFile)
 	tester.SetInterval(config.UpdateInterval)
 	tester.SetMaxNodes(config.MaxNodes)
-	tester.SetConcurrency(config.TestConcurrency)
+
+	// Windows环境使用更保守的并发数
+	if runtime.GOOS == "windows" {
+		tester.SetConcurrency(2) // Windows下进一步降低MVP测试器并发数
+	} else {
+		tester.SetConcurrency(config.TestConcurrency)
+	}
 
 	// 创建代理服务器
 	proxyServer := NewProxyServer(bestNodeFile, config.HTTPPort, config.SOCKSPort)
@@ -140,7 +163,12 @@ func (m *AutoProxyManager) Start() error {
 	go m.runTesterProcess()
 
 	// 等待一下，让测试器先运行并生成初始的最佳节点文件
-	time.Sleep(3 * time.Second)
+	// Windows需要更长的启动时间
+	waitTime := 3 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 8 * time.Second
+	}
+	time.Sleep(waitTime)
 
 	// 启动进程2：代理服务器
 	fmt.Printf("🌐 启动进程2：代理服务器...\n")
@@ -586,12 +614,32 @@ func (m *AutoProxyManager) cleanExpiredBlacklist() {
 
 // killRelatedProcesses 杀死相关进程
 func (m *AutoProxyManager) killRelatedProcesses() {
+	fmt.Printf("  💀 终止相关进程...\n")
+
+	// 首先尝试通过端口清理
+	ports := []int{m.config.HTTPPort, m.config.SOCKSPort}
+	for _, port := range ports {
+		if err := platform.KillProcessByPort(port); err == nil {
+			fmt.Printf("    🔧 已终止占用端口 %d 的进程\n", port)
+		}
+	}
+
+	// 然后按进程名清理
 	processNames := []string{"v2ray", "xray", "hysteria2", "hysteria"}
 
-	for _, processName := range processNames {
-		cmd := exec.Command("pkill", "-f", processName)
-		if err := cmd.Run(); err == nil {
-			fmt.Printf("    💀 已终止 %s 进程\n", processName)
+	if runtime.GOOS == "windows" {
+		// Windows 使用taskkill
+		for _, processName := range processNames {
+			if err := platform.KillProcessByName(processName + ".exe"); err == nil {
+				fmt.Printf("    💀 已终止 %s 进程\n", processName)
+			}
+		}
+	} else {
+		// Unix 使用pkill
+		for _, processName := range processNames {
+			if err := platform.KillProcessByName(processName); err == nil {
+				fmt.Printf("    💀 已终止 %s 进程\n", processName)
+			}
 		}
 	}
 }

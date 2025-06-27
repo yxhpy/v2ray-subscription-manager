@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"syscall"
@@ -275,12 +277,25 @@ func (m *MVPTester) cleanupTempFiles() {
 
 // killRelatedProcesses 杀死相关进程
 func (m *MVPTester) killRelatedProcesses() {
+	fmt.Printf("    💀 终止MVP相关进程...\n")
+
 	processNames := []string{"v2ray", "xray", "hysteria2", "hysteria"}
 
-	for _, processName := range processNames {
-		cmd := exec.Command("pkill", "-f", processName)
-		if err := cmd.Run(); err == nil {
-			fmt.Printf("    💀 已终止 %s 进程\n", processName)
+	if runtime.GOOS == "windows" {
+		// Windows 使用taskkill
+		for _, processName := range processNames {
+			cmd := exec.Command("taskkill", "/F", "/IM", processName+".exe")
+			if err := cmd.Run(); err == nil {
+				fmt.Printf("      🔧 已终止 %s 进程\n", processName)
+			}
+		}
+	} else {
+		// Unix 使用pkill
+		for _, processName := range processNames {
+			cmd := exec.Command("pkill", "-f", processName)
+			if err := cmd.Run(); err == nil {
+				fmt.Printf("      🔧 已终止 %s 进程\n", processName)
+			}
 		}
 	}
 }
@@ -466,8 +481,12 @@ func (m *MVPTester) testV2RayNode(node *types.Node, result types.ValidNode, port
 	time.Sleep(5 * time.Second)
 
 	// 测试连接性能
-	latency, speed, err := m.testProxyPerformance(fmt.Sprintf("http://127.0.0.1:%d", httpPort))
+	proxyTestURL := fmt.Sprintf("http://127.0.0.1:%d", httpPort)
+	fmt.Printf("🧪 测试V2Ray代理URL: %s\n", proxyTestURL)
+
+	latency, speed, err := m.testProxyPerformance(proxyTestURL)
 	if err != nil {
+		fmt.Printf("❌ V2Ray代理性能测试失败: %v\n", err)
 		return result
 	}
 
@@ -503,12 +522,20 @@ func (m *MVPTester) testHysteria2Node(node *types.Node, result types.ValidNode, 
 		return result
 	}
 
-	// 等待代理启动
-	time.Sleep(5 * time.Second)
+	// 等待代理启动 - Windows需要更长时间
+	waitTime := 5 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 8 * time.Second
+	}
+	time.Sleep(waitTime)
 
 	// 测试连接性能
-	latency, speed, err := m.testProxyPerformance(fmt.Sprintf("http://127.0.0.1:%d", httpPort))
+	proxyTestURL := fmt.Sprintf("http://127.0.0.1:%d", httpPort)
+	fmt.Printf("🧪 测试Hysteria2代理URL: %s\n", proxyTestURL)
+
+	latency, speed, err := m.testProxyPerformance(proxyTestURL)
 	if err != nil {
+		fmt.Printf("❌ Hysteria2代理性能测试失败: %v\n", err)
 		return result
 	}
 
@@ -526,47 +553,182 @@ func (m *MVPTester) testHysteria2Node(node *types.Node, result types.ValidNode, 
 
 // testProxyPerformance 测试代理性能
 func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error) {
+	// 添加panic恢复机制
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("❌ testProxyPerformance发生panic: %v\n", r)
+		}
+	}()
+
+	// 检查输入参数
+	if proxyURL == "" {
+		return 0, 0, fmt.Errorf("代理URL为空")
+	}
+
 	// 创建代理客户端
 	proxyURLParsed, err := url.Parse(proxyURL)
 	if err != nil {
 		return 0, 0, fmt.Errorf("解析代理URL失败: %v", err)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURLParsed),
-		},
-		Timeout: 20 * time.Second, // 增加超时时间
+	if proxyURLParsed == nil {
+		return 0, 0, fmt.Errorf("解析后的代理URL为空")
 	}
 
-	// 尝试多个测试URL
-	testURLs := []string{
-		"http://httpbin.org/ip",
-		"http://www.google.com",
-		"http://www.baidu.com",
-		"http://www.github.com",
+	// 创建代理函数
+	proxyFunc := http.ProxyURL(proxyURLParsed)
+	if proxyFunc == nil {
+		return 0, 0, fmt.Errorf("创建代理函数失败")
+	}
+
+	// 创建更健壮的Transport配置
+	transport := &http.Transport{
+		Proxy: proxyFunc,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     false, // 禁用HTTP/2，避免兼容性问题
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false,
+		DisableCompression:    false,
+	}
+
+	// 检查transport是否创建成功
+	if transport == nil {
+		return 0, 0, fmt.Errorf("创建传输层失败")
+	}
+
+	// Windows下使用更长的超时时间
+	timeout := 20 * time.Second
+	if runtime.GOOS == "windows" {
+		timeout = 45 * time.Second
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
+	}
+
+	// 检查client是否创建成功
+	if client == nil {
+		return 0, 0, fmt.Errorf("创建HTTP客户端失败")
+	}
+
+	// 根据系统环境选择测试URL
+	var testURLs []string
+	if runtime.GOOS == "windows" {
+		// Windows环境优先使用国内和稳定的URL
+		testURLs = []string{
+			"http://www.baidu.com",
+			"http://httpbin.org/ip",
+			"http://www.bing.com",
+			"http://www.github.com",
+			"http://www.google.com", // 放到最后尝试
+		}
+	} else {
+		// Unix环境使用原有策略
+		testURLs = []string{
+			"http://httpbin.org/ip",
+			"http://www.google.com",
+			"http://www.baidu.com",
+			"http://www.github.com",
+		}
 	}
 
 	var lastErr error
 	for _, testURL := range testURLs {
-		// 测试延迟
-		start := time.Now()
-		resp, err := client.Get(testURL)
+		// 对每个URL进行重试
+		maxRetries := 2
+		if runtime.GOOS == "windows" {
+			maxRetries = 3 // Windows下增加重试次数
+		}
+
+		var resp *http.Response
+		var err error
+		var start time.Time
+
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			// 测试延迟
+			start = time.Now()
+
+			// 创建请求
+			req, err := http.NewRequest("GET", testURL, nil)
+			if err != nil {
+				lastErr = fmt.Errorf("创建请求失败: %v", err)
+				break
+			}
+
+			if req == nil {
+				lastErr = fmt.Errorf("创建的请求为空")
+				break
+			}
+
+			// 设置更兼容的请求头
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+			req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+			req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+			req.Header.Set("Accept-Encoding", "gzip, deflate")
+			req.Header.Set("Connection", "keep-alive")
+			req.Header.Set("Cache-Control", "no-cache")
+
+			// 检查客户端是否为空
+			if client == nil {
+				lastErr = fmt.Errorf("HTTP客户端为空")
+				break
+			}
+
+			resp, err = client.Do(req)
+			if err == nil {
+				break // 成功，跳出重试循环
+			}
+
+			lastErr = fmt.Errorf("请求 %s 失败 (尝试 %d/%d): %v", testURL, attempt, maxRetries, err)
+
+			// 如果不是最后一次尝试，等待一段时间再重试
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
+		}
+
 		if err != nil {
-			lastErr = fmt.Errorf("请求 %s 失败: %v", testURL, err)
+			continue // 这个URL失败，尝试下一个
+		}
+
+		// 检查响应是否为空
+		if resp == nil {
+			lastErr = fmt.Errorf("响应对象为空")
 			continue
 		}
 
 		latency := time.Since(start).Milliseconds()
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
 			lastErr = fmt.Errorf("%s 返回状态码: %d", testURL, resp.StatusCode)
 			continue
 		}
 
 		// 测试速度 - 下载内容
 		speedStart := time.Now()
+
+		// 检查响应体是否为空
+		if resp.Body == nil {
+			lastErr = fmt.Errorf("响应体为空")
+			continue
+		}
+
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
