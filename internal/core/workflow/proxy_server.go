@@ -483,6 +483,7 @@ func (ps *ProxyServer) cleanupTempFiles() {
 		"proxy_server_hysteria2_*.json",
 		"temp_v2ray_config_*.json",
 		"temp_hysteria2_config_*.json",
+		"test_proxy_*.json",
 		"*.tmp",
 		"*.temp",
 	}
@@ -506,6 +507,7 @@ func (ps *ProxyServer) cleanupTempFiles() {
 	hysteria2Patterns := []string{
 		"./hysteria2/proxy_server_*.yaml",
 		"./hysteria2/temp_*.yaml",
+		"./hysteria2/test_proxy_*.yaml",
 	}
 
 	for _, pattern := range hysteria2Patterns {

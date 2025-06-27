@@ -8,12 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/downloader"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/utils"
 	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
@@ -422,8 +422,8 @@ func (m *AutoProxyManager) cleanup() {
 	// 清理过期黑名单
 	m.cleanExpiredBlacklist()
 
-	// 清理临时配置文件
-	m.cleanupTempFiles()
+	// 使用通用清理函数
+	utils.ForceCleanupAll()
 
 	// 杀死相关进程
 	m.killRelatedProcesses()
@@ -441,56 +441,6 @@ func (m *AutoProxyManager) cleanExpiredBlacklist() {
 		if now.After(expireTime) {
 			delete(m.blacklist, key)
 		}
-	}
-}
-
-// cleanupTempFiles 清理临时文件
-func (m *AutoProxyManager) cleanupTempFiles() {
-	patterns := []string{
-		"temp_v2ray_config_*.json",
-		"test_v2ray_config_*.json",
-		"proxy_server_v2ray_*.json",
-		"*.tmp",
-		"*.temp",
-	}
-
-	cleanedCount := 0
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range matches {
-			if err := os.Remove(file); err == nil {
-				cleanedCount++
-			}
-		}
-	}
-
-	// 清理hysteria2目录下的临时文件
-	hysteria2Patterns := []string{
-		"./hysteria2/test_config_*.yaml",
-		"./hysteria2/temp_*.yaml",
-		"./hysteria2/config_*.yaml",
-		"./hysteria2/test_proxy_*.yaml",
-	}
-
-	for _, pattern := range hysteria2Patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range matches {
-			if err := os.Remove(file); err == nil {
-				cleanedCount++
-			}
-		}
-	}
-
-	if cleanedCount > 0 {
-		fmt.Printf("    ✅ 共清理了 %d 个临时文件\n", cleanedCount)
 	}
 }
 

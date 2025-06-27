@@ -294,13 +294,15 @@ func (w *SpeedTestWorkflow) cleanupAdditionalTempFiles() {
 		"*.temp",
 		"config_*.json",
 		"temp_*.yaml",
+		"test_proxy_*.json", // 添加test_proxy_开头的JSON文件
+		"test_proxy_*.yaml", // 添加test_proxy_开头的YAML文件
 	}
 
 	for _, pattern := range patterns {
 		if files, err := filepath.Glob(pattern); err == nil {
 			for _, file := range files {
 				// 只删除明显是临时文件的
-				if strings.Contains(file, "temp") || strings.Contains(file, "tmp") {
+				if strings.Contains(file, "temp") || strings.Contains(file, "tmp") || strings.Contains(file, "test_proxy") {
 					if err := os.Remove(file); err == nil {
 						fmt.Printf("🧹 已清理临时文件: %s\n", file)
 					}

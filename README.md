@@ -174,16 +174,25 @@ chmod +x scripts/build.sh
 
 #### 6. 系统清理 🧹
 ```bash
-# 清理所有临时文件和进程
+# 使用独立清理工具清理临时文件（推荐）
+./bin/cleanup
+
+# 手动构建清理工具
+./scripts/build_cleanup.sh
+
+# 清理所有临时文件和进程（如果主程序支持）
 ./v2ray-manager cleanup
 
-# 强制终止所有相关进程（包括代理管理器）
+# 强制终止所有相关进程
 ./v2ray-manager kill-all
-
-# 使用独立清理脚本（无需编译的程序）
-./scripts/cleanup.sh        # Linux/macOS
-scripts\cleanup.bat         # Windows
 ```
+
+**清理工具说明：**
+- 自动清理 `auto_proxy_best_node.json`、`test_proxy_*.json` 等临时文件
+- 清理所有代理配置文件和状态文件
+- 安全清理，不会删除重要配置文件
+- 详细清理日志，显示删除的文件
+- 参见 [清理指南](docs/CLEANUP_GUIDE.md) 了解更多
 
 ## 📖 详细命令
 

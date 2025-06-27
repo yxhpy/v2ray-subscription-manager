@@ -147,6 +147,10 @@ func (m *MVPTester) Stop() error {
 	fmt.Printf("  🧹 清理临时配置文件...\n")
 	m.cleanupTempFiles()
 
+	// 清理状态文件
+	fmt.Printf("  🧹 清理状态文件...\n")
+	m.cleanupStateFile()
+
 	// 杀死相关进程
 	fmt.Printf("  💀 杀死相关进程...\n")
 	m.killRelatedProcesses()
@@ -155,11 +159,21 @@ func (m *MVPTester) Stop() error {
 	return nil
 }
 
+// cleanupStateFile 清理状态文件
+func (m *MVPTester) cleanupStateFile() {
+	if m.stateFile != "" {
+		if err := os.Remove(m.stateFile); err == nil {
+			fmt.Printf("    🗑️  已删除状态文件: %s\n", m.stateFile)
+		}
+	}
+}
+
 // cleanupTempFiles 清理临时文件
 func (m *MVPTester) cleanupTempFiles() {
 	patterns := []string{
 		"temp_v2ray_config_*.json",
 		"temp_hysteria2_config_*.json",
+		"test_proxy_*.json", // 添加test_proxy_开头的文件
 		"*.tmp",
 		"*.temp",
 	}
