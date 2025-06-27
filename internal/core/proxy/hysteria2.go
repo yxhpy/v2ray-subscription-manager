@@ -54,10 +54,10 @@ func (h *Hysteria2ProxyManager) StartHysteria2Proxy(node *types.Node) error {
 	}
 
 	// 分配端口（如果还未设置）
-	if h.HTTPPort == 0 || h.HTTPPort == 8081 {
+	if h.HTTPPort == 0 {
 		h.HTTPPort = findAvailablePort(8081)
 	}
-	if h.SOCKSPort == 0 || h.SOCKSPort == 1081 {
+	if h.SOCKSPort == 0 {
 		h.SOCKSPort = findAvailablePort(1081)
 	}
 
@@ -195,4 +195,11 @@ func (h *Hysteria2ProxyManager) GetHysteria2Status() ProxyStatus {
 	}
 
 	return status
+}
+
+// SetConfigPath 设置配置文件路径
+func (h *Hysteria2ProxyManager) SetConfigPath(configPath string) {
+	if h.downloader != nil {
+		h.downloader.ConfigPath = configPath
+	}
 }

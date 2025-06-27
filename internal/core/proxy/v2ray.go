@@ -545,9 +545,13 @@ func (pm *ProxyManager) StartProxy(node *types.Node) error {
 		pm.StopProxy()
 	}
 
-	// 分配端口
-	pm.HTTPPort = findAvailablePort(8080)
-	pm.SOCKSPort = findAvailablePort(1080)
+	// 分配端口（如果尚未设置）
+	if pm.HTTPPort == 0 {
+		pm.HTTPPort = findAvailablePort(8080)
+	}
+	if pm.SOCKSPort == 0 {
+		pm.SOCKSPort = findAvailablePort(1080)
+	}
 
 	fmt.Fprintf(os.Stderr, "🔧 配置代理端口: HTTP=%d, SOCKS=%d\n", pm.HTTPPort, pm.SOCKSPort)
 

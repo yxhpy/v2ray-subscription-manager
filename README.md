@@ -172,6 +172,19 @@ chmod +x scripts/build.sh
   --test-url=http://www.baidu.com
 ```
 
+#### 6. 系统清理 🧹
+```bash
+# 清理所有临时文件和进程
+./v2ray-manager cleanup
+
+# 强制终止所有相关进程（包括代理管理器）
+./v2ray-manager kill-all
+
+# 使用独立清理脚本（无需编译的程序）
+./scripts/cleanup.sh        # Linux/macOS
+scripts\cleanup.bat         # Windows
+```
+
 ## 📖 详细命令
 
 ### 订阅解析命令
@@ -198,6 +211,22 @@ stop-hysteria2                      # 停止Hysteria2代理
 proxy-status                        # 查看V2Ray代理状态
 hysteria2-status                    # 查看Hysteria2代理状态
 test-proxy                          # 测试V2Ray代理连接
+
+### 清理命令
+```bash
+cleanup                             # 清理所有临时文件和进程
+kill-all                            # 强制终止所有相关进程
+```
+
+**清理功能说明：**
+- `cleanup`: 智能清理临时文件、终止相关进程、释放端口
+- `kill-all`: 强制终止所有相关进程，包括V2Ray、Hysteria2、代理管理器等
+- 独立脚本：`scripts/cleanup.sh` (Linux/macOS) 和 `scripts/cleanup.bat` (Windows)
+- 支持跨平台清理，自动检测操作系统
+- 保护用户配置文件，只清理临时文件
+
+### 测试命令
+```bash
 test-hysteria2                      # 测试Hysteria2代理连接
 ```
 
@@ -289,6 +318,8 @@ scripts\release.bat v1.4.0 "项目重构完成，优化架构和性能"
 - ⚡ **性能优化**：优化并发处理和资源管理
 - 🔧 **改进的工作流**：更稳定的测速工作流，支持大规模节点测试
 - 📊 **增强报告**：更详细的测试报告和统计信息
+- 🧹 **新增清理功能**：完善的系统清理机制，支持一键清理临时文件和进程
+- 🔄 **自动代理服务**：新增高度可配置的自动代理服务，支持30+配置参数
 - 🛠️ **Bug修复**：修复多个已知问题，提升稳定性
 - 📚 **文档更新**：完善的项目文档和使用说明
 
