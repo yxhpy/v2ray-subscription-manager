@@ -7,14 +7,16 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/proxy"
 )
 
-var proxyManager *ProxyManager
-var hysteria2Manager *Hysteria2ProxyManager
+var proxyManager *proxy.Manager
+var hysteria2Manager *proxy.Hysteria2Manager
 
 func init() {
-	proxyManager = NewProxyManager()
-	hysteria2Manager = NewHysteria2ProxyManager()
+	proxyManager = proxy.NewManager()
+	hysteria2Manager = proxy.NewHysteria2Manager()
 }
 
 func main() {

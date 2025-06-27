@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"encoding/json"
@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/yxhpy/v2ray-subscription-manager/internal/platform"
+	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
 // ProxyStatus 代理状态
@@ -18,7 +21,7 @@ type ProxyStatus struct {
 	Running   bool   `json:"running"`
 	HTTPPort  int    `json:"http_port"`
 	SOCKSPort int    `json:"socks_port"`
-	NodeName  string `json:"node_name"`
+	types.NodeName  string `json:"node_name"`
 	Protocol  string `json:"protocol"`
 	Server    string `json:"server"`
 }
@@ -29,14 +32,14 @@ type ProxyManager struct {
 	HTTPPort     int
 	SOCKSPort    int
 	V2RayProcess *exec.Cmd
-	CurrentNode  *Node
+	Currenttypes.Node  *types.types.Node
 }
 
 // ProxyState 代理状态持久化结构
 type ProxyState struct {
 	HTTPPort    int    `json:"http_port"`
 	SOCKSPort   int    `json:"socks_port"`
-	NodeName    string `json:"node_name"`
+	types.NodeName    string `json:"node_name"`
 	Protocol    string `json:"protocol"`
 	Server      string `json:"server"`
 	ConfigPath  string `json:"config_path"`
@@ -72,7 +75,7 @@ func findAvailablePort(startPort int) int {
 }
 
 // generateV2RayConfig 生成V2Ray配置
-func generateV2RayConfig(node *Node, httpPort, socksPort int) (map[string]interface{}, error) {
+func generateV2RayConfig(node *types.types.Node, httpPort, socksPort int) (map[string]interface{}, error) {
 	config := map[string]interface{}{
 		"log": map[string]interface{}{
 			"loglevel": "warning",
@@ -235,7 +238,7 @@ func generateV2RayConfig(node *Node, httpPort, socksPort int) (map[string]interf
 }
 
 // generateStreamSettings 生成流设置
-func generateStreamSettings(node *Node) map[string]interface{} {
+func generateStreamSettings(node *types.types.Node) map[string]interface{} {
 	streamSettings := map[string]interface{}{
 		"network": "tcp", // 默认TCP
 	}
@@ -349,7 +352,7 @@ func getVmessSecurity(scy string) string {
 }
 
 // generateVmessStreamSettings 生成VMess流设置
-func generateVmessStreamSettings(node *Node) map[string]interface{} {
+func generateVmessStreamSettings(node *types.types.Node) map[string]interface{} {
 	streamSettings := map[string]interface{}{
 		"network": "tcp", // 默认TCP
 	}
@@ -422,7 +425,7 @@ func generateVmessStreamSettings(node *Node) map[string]interface{} {
 }
 
 // generateTrojanStreamSettings 生成Trojan流设置
-func generateTrojanStreamSettings(node *Node) map[string]interface{} {
+func generateTrojanStreamSettings(node *types.types.Node) map[string]interface{} {
 	streamSettings := map[string]interface{}{
 		"network": "tcp", // 默认TCP
 	}
@@ -454,53 +457,53 @@ func generateTrojanStreamSettings(node *Node) map[string]interface{} {
 }
 
 // StartRandomProxy 启动随机代理
-func (pm *ProxyManager) StartRandomProxy(nodes []*Node) error {
+func (pm *ProxyManager) StartRandomProxy(nodes []*types.types.Node) error {
 	if len(nodes) == 0 {
 		return fmt.Errorf("没有可用的节点")
 	}
 
 	// 过滤支持的协议
-	supportedNodes := []*Node{}
+	supportedtypes.Nodes := []*types.types.Node{}
 	for _, node := range nodes {
 		if node.Protocol == "vless" || node.Protocol == "ss" || node.Protocol == "vmess" || node.Protocol == "trojan" {
-			supportedNodes = append(supportedNodes, node)
+			supportedtypes.Nodes = append(supportedtypes.Nodes, node)
 		}
 	}
 
-	if len(supportedNodes) == 0 {
+	if len(supportedtypes.Nodes) == 0 {
 		return fmt.Errorf("没有支持的协议节点 (支持VLESS、SS、VMess、Trojan)")
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	randomIndex := rand.Intn(len(supportedNodes))
-	selectedNode := supportedNodes[randomIndex]
+	randomIndex := rand.Intn(len(supportedtypes.Nodes))
+	selectedtypes.Node := supportedtypes.Nodes[randomIndex]
 
 	// 找到原始索引用于显示
 	originalIndex := -1
 	for i, node := range nodes {
-		if node == selectedNode {
+		if node == selectedtypes.Node {
 			originalIndex = i
 			break
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "🎲 随机选择节点[%d]: %s (%s)\n", originalIndex, selectedNode.Name, selectedNode.Protocol)
-	return pm.StartProxy(selectedNode)
+	fmt.Fprintf(os.Stderr, "🎲 随机选择节点[%d]: %s (%s)\n", originalIndex, selectedtypes.Node.Name, selectedtypes.Node.Protocol)
+	return pm.StartProxy(selectedtypes.Node)
 }
 
 // StartProxyByIndex 按索引启动代理
-func (pm *ProxyManager) StartProxyByIndex(nodes []*Node, index int) error {
+func (pm *ProxyManager) StartProxyByIndex(nodes []*types.types.Node, index int) error {
 	if index < 0 || index >= len(nodes) {
 		return fmt.Errorf("节点索引 %d 超出范围 (0-%d)", index, len(nodes)-1)
 	}
 
-	selectedNode := nodes[index]
-	fmt.Fprintf(os.Stderr, "📍 选择节点[%d]: %s (%s)\n", index, selectedNode.Name, selectedNode.Protocol)
-	return pm.StartProxy(selectedNode)
+	selectedtypes.Node := nodes[index]
+	fmt.Fprintf(os.Stderr, "📍 选择节点[%d]: %s (%s)\n", index, selectedtypes.Node.Name, selectedtypes.Node.Protocol)
+	return pm.StartProxy(selectedtypes.Node)
 }
 
 // StartProxy 启动代理
-func (pm *ProxyManager) StartProxy(node *Node) error {
+func (pm *ProxyManager) StartProxy(node *types.types.Node) error {
 	// 检查V2Ray是否安装
 	if !pm.checkV2RayInstalled() {
 		return fmt.Errorf("V2Ray未安装，请先运行: %s download-v2ray", os.Args[0])
@@ -545,15 +548,15 @@ func (pm *ProxyManager) StartProxy(node *Node) error {
 	}
 
 	pm.V2RayProcess = exec.Command(v2rayPath, "run", "-c", pm.ConfigPath)
-	pm.CurrentNode = node
+	pm.Currenttypes.Node = node
 
 	// 设置进程组，便于管理
-	setProcAttributes(pm.V2RayProcess)
+	platform.SetProcAttributes(pm.V2RayProcess)
 
 	err = pm.V2RayProcess.Start()
 	if err != nil {
 		pm.V2RayProcess = nil
-		pm.CurrentNode = nil
+		pm.Currenttypes.Node = nil
 		return fmt.Errorf("启动V2Ray失败: %v", err)
 	}
 
@@ -563,7 +566,7 @@ func (pm *ProxyManager) StartProxy(node *Node) error {
 	// 检查进程是否仍在运行
 	if !pm.isV2RayRunning() {
 		pm.V2RayProcess = nil
-		pm.CurrentNode = nil
+		pm.Currenttypes.Node = nil
 		return fmt.Errorf("V2Ray进程启动后意外退出，可能是配置问题")
 	}
 
@@ -596,7 +599,7 @@ func (pm *ProxyManager) StopProxy() error {
 	// 等待进程结束
 	pm.V2RayProcess.Wait()
 	pm.V2RayProcess = nil
-	pm.CurrentNode = nil
+	pm.Currenttypes.Node = nil
 
 	// 清理配置文件
 	if _, err := os.Stat(pm.ConfigPath); err == nil {
@@ -618,10 +621,10 @@ func (pm *ProxyManager) GetStatus() ProxyStatus {
 		SOCKSPort: pm.SOCKSPort,
 	}
 
-	if pm.CurrentNode != nil {
-		status.NodeName = pm.CurrentNode.Name
-		status.Protocol = pm.CurrentNode.Protocol
-		status.Server = pm.CurrentNode.Server
+	if pm.Currenttypes.Node != nil {
+		status.types.NodeName = pm.Currenttypes.Node.Name
+		status.Protocol = pm.Currenttypes.Node.Protocol
+		status.Server = pm.Currenttypes.Node.Server
 	}
 
 	return status
@@ -673,8 +676,8 @@ func (pm *ProxyManager) checkV2RayInstalled() bool {
 	return false
 }
 
-// ListNodes 列出所有节点（带索引）
-func ListNodes(nodes []*Node) {
+// Listtypes.Nodes 列出所有节点（带索引）
+func Listtypes.Nodes(nodes []*types.types.Node) {
 	fmt.Fprintf(os.Stderr, "\n📋 可用节点列表:\n")
 	fmt.Fprintf(os.Stderr, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
@@ -715,7 +718,7 @@ func (pm *ProxyManager) TestProxy() error {
 
 // saveState 保存代理状态
 func (pm *ProxyManager) saveState() error {
-	if pm.CurrentNode == nil {
+	if pm.Currenttypes.Node == nil {
 		// 删除状态文件
 		os.Remove(StateFile)
 		return nil
@@ -724,9 +727,9 @@ func (pm *ProxyManager) saveState() error {
 	state := ProxyState{
 		HTTPPort:    pm.HTTPPort,
 		SOCKSPort:   pm.SOCKSPort,
-		NodeName:    pm.CurrentNode.Name,
-		Protocol:    pm.CurrentNode.Protocol,
-		Server:      pm.CurrentNode.Server,
+		types.NodeName:    pm.Currenttypes.Node.Name,
+		Protocol:    pm.Currenttypes.Node.Protocol,
+		Server:      pm.Currenttypes.Node.Server,
 		ConfigPath:  pm.ConfigPath,
 		LastUpdated: time.Now().Unix(),
 	}
@@ -762,9 +765,9 @@ func (pm *ProxyManager) loadState() {
 	pm.SOCKSPort = state.SOCKSPort
 	pm.ConfigPath = state.ConfigPath
 
-	// 创建虚拟Node对象
-	pm.CurrentNode = &Node{
-		Name:     state.NodeName,
+	// 创建虚拟types.Node对象
+	pm.Currenttypes.Node = &types.Node{
+		Name:     state.types.NodeName,
 		Protocol: state.Protocol,
 		Server:   state.Server,
 	}

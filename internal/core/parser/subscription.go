@@ -1,4 +1,4 @@
-package main
+package parser
 
 import (
 	"encoding/base64"
@@ -10,18 +10,6 @@ import (
 	"os"
 	"strings"
 )
-
-// Node 表示一个V2Ray节点
-type Node struct {
-	Name       string            `json:"name"`
-	Protocol   string            `json:"protocol"`
-	Server     string            `json:"server"`
-	Port       string            `json:"port"`
-	UUID       string            `json:"uuid,omitempty"`
-	Method     string            `json:"method,omitempty"`
-	Password   string            `json:"password,omitempty"`
-	Parameters map[string]string `json:"parameters"`
-}
 
 // fetchSubscription 从URL获取订阅内容
 func fetchSubscription(url string) (string, error) {
@@ -87,7 +75,7 @@ func decodeBase64(content string) (string, error) {
 }
 
 // parseHysteria2 解析hysteria2协议链接
-func parseHysteria2(link string) (*Node, error) {
+func parseHysteria2(link string) (*types.Node, error) {
 	// hysteria2://user@server:port?params#name
 	link = strings.TrimPrefix(link, "hysteria2://")
 
@@ -133,7 +121,7 @@ func parseHysteria2(link string) (*Node, error) {
 		}
 	}
 
-	return &Node{
+	return &types.Node{
 		Name:       name,
 		Protocol:   "hysteria2",
 		Server:     server,
@@ -144,7 +132,7 @@ func parseHysteria2(link string) (*Node, error) {
 }
 
 // parseVless 解析vless协议链接
-func parseVless(link string) (*Node, error) {
+func parseVless(link string) (*types.Node, error) {
 	// vless://uuid@server:port?params#name
 	link = strings.TrimPrefix(link, "vless://")
 
@@ -190,7 +178,7 @@ func parseVless(link string) (*Node, error) {
 		}
 	}
 
-	return &Node{
+	return &types.Node{
 		Name:       name,
 		Protocol:   "vless",
 		Server:     server,
@@ -201,7 +189,7 @@ func parseVless(link string) (*Node, error) {
 }
 
 // parseSS 解析ss协议链接
-func parseSS(link string) (*Node, error) {
+func parseSS(link string) (*types.Node, error) {
 	// ss://base64编码或method:password@server:port#name
 	link = strings.TrimPrefix(link, "ss://")
 
@@ -291,7 +279,7 @@ func parseSS(link string) (*Node, error) {
 		}
 	}
 
-	return &Node{
+	return &types.Node{
 		Name:       name,
 		Protocol:   "ss",
 		Server:     server,
@@ -303,7 +291,7 @@ func parseSS(link string) (*Node, error) {
 }
 
 // parseVmess 解析vmess协议链接
-func parseVmess(link string) (*Node, error) {
+func parseVmess(link string) (*types.Node, error) {
 	// vmess://base64编码的JSON配置
 	link = strings.TrimPrefix(link, "vmess://")
 
@@ -379,7 +367,7 @@ func parseVmess(link string) (*Node, error) {
 		parameters["sni"] = sni
 	}
 
-	return &Node{
+	return &types.Node{
 		Name:       name,
 		Protocol:   "vmess",
 		Server:     server,
@@ -390,7 +378,7 @@ func parseVmess(link string) (*Node, error) {
 }
 
 // parseTrojan 解析trojan协议链接
-func parseTrojan(link string) (*Node, error) {
+func parseTrojan(link string) (*types.Node, error) {
 	// trojan://password@server:port?params#name
 	link = strings.TrimPrefix(link, "trojan://")
 
@@ -436,7 +424,7 @@ func parseTrojan(link string) (*Node, error) {
 		}
 	}
 
-	return &Node{
+	return &types.Node{
 		Name:       name,
 		Protocol:   "trojan",
 		Server:     server,
@@ -447,8 +435,8 @@ func parseTrojan(link string) (*Node, error) {
 }
 
 // parseLinks 解析所有链接
-func parseLinks(content string) ([]*Node, error) {
-	var nodes []*Node
+func parseLinks(content string) ([]*types.Node, error) {
+	var nodes []*types.Node
 	var errors []string
 
 	lines := strings.Split(content, "\n")
@@ -458,7 +446,7 @@ func parseLinks(content string) ([]*Node, error) {
 			continue
 		}
 
-		var node *Node
+		var node *types.Node
 		var err error
 
 		if strings.HasPrefix(line, "hysteria2://") {

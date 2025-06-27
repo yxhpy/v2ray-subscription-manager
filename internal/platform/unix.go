@@ -1,13 +1,13 @@
 //go:build !windows
 
-package main
+package platform
 
 import (
 	"os/exec"
 	"syscall"
 )
 
-// setProcAttributes 设置进程属性（Unix平台）
-func setProcAttributes(cmd *exec.Cmd) {
+// SetProcAttributes 设置进程属性（Unix平台）
+func SetProcAttributes(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
