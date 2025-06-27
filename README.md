@@ -70,6 +70,36 @@ cd v2ray-subscription-manager
 go build -o v2ray-subscription-manager .
 ```
 
+### 开发者发布
+
+#### 一键自动化发布（推荐）
+
+**Linux/macOS:**
+```bash
+# 给脚本添加执行权限
+chmod +x release.sh
+
+# 发布新版本
+./release.sh v1.3.0 "添加新功能和修复Bug"
+./release.sh v1.2.1 "修复Windows兼容性问题"
+```
+
+**Windows:**
+```cmd
+# 直接运行批处理脚本
+release.bat v1.3.0 "添加新功能和修复Bug"
+release.bat v1.2.1 "修复Windows兼容性问题"
+```
+
+**自动化发布脚本功能：**
+- ✅ 版本验证和Git状态检查
+- ✅ 跨平台编译（Windows/Linux/macOS × amd64/arm64）
+- ✅ 自动打包和生成SHA256校验和
+- ✅ Git提交、推送和标签创建
+- ✅ 生成完整的GitHub Release说明文件
+
+脚本执行完成后，只需手动在GitHub上创建Release并上传生成的文件。
+
 ### 基本使用
 
 #### 1. 准备工作

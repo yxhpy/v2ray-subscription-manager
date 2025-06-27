@@ -8,13 +8,50 @@ alwaysApply: false
 ## 项目结构
 - 主程序入口: [main.go](mdc:main.go)
 - 构建脚本: [build.sh](mdc:build.sh)
+- **自动化发布脚本**: [release.sh](mdc:release.sh) (Linux/macOS)
+- **Windows发布脚本**: [release.bat](mdc:release.bat) (Windows)
 - README文档: [README.md](mdc:README.md)
 - 发布说明: [RELEASE_NOTES.md](mdc:RELEASE_NOTES.md)
 - Go模块文件: [go.mod](mdc:go.mod)
 
 ## 发布流程
 
-### 🤖 自动化操作
+### 🚀 一键自动化发布
+
+#### 使用自动化发布脚本
+
+**Linux/macOS - [release.sh](mdc:release.sh)**
+```bash
+# 基本用法
+./release.sh <version> [commit_message]
+
+# 示例
+./release.sh v1.3.0 "添加新功能和修复Bug"
+./release.sh v1.2.1 "修复Windows兼容性问题"
+```
+
+**Windows - [release.bat](mdc:release.bat)**
+```cmd
+# 基本用法
+release.bat <version> [commit_message]
+
+# 示例
+release.bat v1.3.0 "添加新功能和修复Bug"
+release.bat v1.2.1 "修复Windows兼容性问题"
+```
+
+#### 自动化脚本功能
+- ✅ **版本验证**: 自动验证版本号格式 (vX.Y.Z)
+- ✅ **工作目录检查**: 检查Git状态，自动处理未提交更改
+- ✅ **跨平台编译**: 自动编译6个平台版本 (Windows/Linux/macOS × amd64/arm64)
+- ✅ **优化构建**: 使用 `-ldflags="-s -w"` 优化二进制文件大小
+- ✅ **自动打包**: 创建各平台zip压缩包和全平台tar.gz包
+- ✅ **文件校验**: 生成SHA256校验和文件
+- ✅ **Git操作**: 自动提交、推送代码和创建标签
+- ✅ **Release说明**: 自动生成GitHub Release描述文件
+- ✅ **彩色输出**: 美观的进度显示和状态反馈
+
+### 🤖 传统分步操作（备用方案）
 
 #### 1. 更新文档（AI自动完成）
 - 更新 [README.md](mdc:README.md) 功能特性列表
@@ -29,46 +66,25 @@ alwaysApply: false
 - 包含性能改进
 - 包含已知问题
 
-#### 3. 自动提交代码
+#### 3. 手动编译和发布
 ```bash
-# 自动添加所有修改的文件
+# 手动编译各平台版本
+GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-subscription-manager-windows-amd64.exe .
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-subscription-manager-linux-amd64 .
+GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-subscription-manager-darwin-amd64 .
+# ... 其他平台
+
+# 手动创建压缩包
+cd bin
+zip v2ray-subscription-manager-v1.3.0-windows-amd64.zip v2ray-subscription-manager-windows-amd64.exe
+# ... 其他压缩包
+
+# 手动Git操作
 git add .
-
-# 自动提交代码，使用语义化提交信息
-git commit -m "fix: 修复Hysteria2重复下载和临时文件清理问题
-
-- 添加全局互斥锁防止Hysteria2重复下载
-- 改进Windows路径兼容性，支持.exe扩展名
-- 完善Base64解码智能检测
-- 增强临时配置文件清理功能
-- 添加文件完整性验证和重试机制"
-
-# 自动推送到远程仓库
+git commit -m "release: 发布v1.3.0版本"
 git push origin main
-```
-
-#### 4. 自动创建Release标签
-```bash
-# 自动创建版本标签
-git tag -a v1.2.0 -m "Release v1.2.0: 修复Windows兼容性和并发问题"
-
-# 自动推送标签到远程
-git push origin v1.2.0
-```
-
-#### 5. 自动编译新版本
-```bash
-# 使用构建脚本自动编译所有平台版本
-chmod +x build.sh
-./build.sh
-
-# 自动编译各平台版本
-GOOS=windows GOARCH=amd64 go build -o bin/v2ray-subscription-manager-windows-amd64.exe .
-GOOS=linux GOARCH=amd64 go build -o bin/v2ray-subscription-manager-linux-amd64 .
-GOOS=darwin GOARCH=amd64 go build -o bin/v2ray-subscription-manager-darwin-amd64 .
-GOOS=darwin GOARCH=arm64 go build -o bin/v2ray-subscription-manager-darwin-arm64 .
-GOOS=linux GOARCH=arm64 go build -o bin/v2ray-subscription-manager-linux-arm64 .
-GOOS=windows GOARCH=arm64 go build -o bin/v2ray-subscription-manager-windows-arm64.exe .
+git tag -a v1.3.0 -m "Release v1.3.0"
+git push origin v1.3.0
 ```
 
 ### 👤 手动操作
@@ -126,7 +142,21 @@ AI会自动生成以下内容供用户使用：
 
 ## 发布检查清单
 
-### 🤖 自动化检查清单
+### 🚀 一键发布检查清单（推荐）
+
+**Linux/macOS** - 使用 [release.sh](mdc:release.sh) 脚本：
+- [ ] 运行 `./release.sh v1.x.x "发布说明"`
+- [ ] 脚本自动完成所有编译和Git操作
+- [ ] 检查生成的 `release_notes_v1.x.x.md` 文件
+- [ ] 手动在GitHub上创建Release并上传文件
+
+**Windows** - 使用 [release.bat](mdc:release.bat) 脚本：
+- [ ] 运行 `release.bat v1.x.x "发布说明"`
+- [ ] 脚本自动完成所有编译和Git操作
+- [ ] 检查生成的 `release_notes_v1.x.x.md` 文件
+- [ ] 手动在GitHub上创建Release并上传文件
+
+### 🤖 传统自动化检查清单（备用）
 - [ ] 所有代码修复已完成
 - [ ] [README.md](mdc:README.md) 已自动更新
 - [ ] [RELEASE_NOTES.md](mdc:RELEASE_NOTES.md) 已自动更新
@@ -142,6 +172,12 @@ AI会自动生成以下内容供用户使用：
 - [ ] Release已成功发布
 - [ ] 用户已验证下载链接可用
 
-### 📋 完整发布流程
+### 📋 发布流程对比
+
+#### 🚀 一键自动化流程（推荐）
+1. **运行脚本**: `./release.sh v1.x.x "发布说明"`
+2. **手动操作**: GitHub Release创建 → 文件上传 → 发布确认
+
+#### 🤖 传统分步流程
 1. **AI自动执行**: 代码修复 → 文档更新 → 提交推送 → 标签创建 → 编译构建
 2. **用户手动执行**: GitHub Release创建 → 文件上传 → 发布确认
