@@ -106,11 +106,21 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 	tester.SetInterval(config.UpdateInterval)
 	tester.SetMaxNodes(config.MaxNodes)
 
-	// Windows环境使用更保守的并发数
+	// 应用用户指定的并发数，Windows环境下仍然尊重用户设置
+	tester.SetConcurrency(config.TestConcurrency)
+
+	// 应用用户指定的超时时间和测试URL
+	tester.SetTimeout(config.TestTimeout)
+	tester.SetTestURL(config.TestURL)
+
+	// 显示当前配置信息
+	fmt.Printf("🔧 MVP测试器配置:\n")
+	fmt.Printf("   📊 并发数: %d\n", config.TestConcurrency)
+	fmt.Printf("   ⏱️ 超时时间: %v\n", config.TestTimeout)
+	fmt.Printf("   🎯 测试URL: %s\n", config.TestURL)
+	fmt.Printf("   📈 最大节点数: %d\n", config.MaxNodes)
 	if runtime.GOOS == "windows" {
-		tester.SetConcurrency(2) // Windows下进一步降低MVP测试器并发数
-	} else {
-		tester.SetConcurrency(config.TestConcurrency)
+		fmt.Printf("   🪟 Windows优化: 已启用\n")
 	}
 
 	// 创建代理服务器

@@ -37,6 +37,10 @@ type MVPTester struct {
 	concurrency      int
 	proxyManager     *proxy.ProxyManager
 	hysteria2Manager *proxy.Hysteria2ProxyManager
+
+	// 添加配置字段
+	testTimeout time.Duration
+	testURL     string
 }
 
 // MVPState MVP状态
@@ -52,6 +56,14 @@ type MVPState struct {
 func NewMVPTester(subscriptionURL string) *MVPTester {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// 根据平台设置默认超时时间
+	defaultTimeout := 30 * time.Second
+	defaultTestURL := "http://www.google.com"
+	if runtime.GOOS == "windows" {
+		defaultTimeout = 60 * time.Second       // Windows下使用更长超时
+		defaultTestURL = "http://www.baidu.com" // Windows下使用百度
+	}
+
 	return &MVPTester{
 		subscriptionURL:  subscriptionURL,
 		ctx:              ctx,
@@ -62,6 +74,10 @@ func NewMVPTester(subscriptionURL string) *MVPTester {
 		concurrency:      5,
 		proxyManager:     proxy.NewProxyManager(),
 		hysteria2Manager: proxy.NewHysteria2ProxyManager(),
+
+		// 使用平台相关的默认值
+		testTimeout: defaultTimeout,
+		testURL:     defaultTestURL,
 	}
 }
 
@@ -83,6 +99,16 @@ func (m *MVPTester) SetConcurrency(concurrency int) {
 // SetStateFile 设置状态文件路径
 func (m *MVPTester) SetStateFile(stateFile string) {
 	m.stateFile = stateFile
+}
+
+// SetTimeout 设置测试超时时间
+func (m *MVPTester) SetTimeout(timeout time.Duration) {
+	m.testTimeout = timeout
+}
+
+// SetTestURL 设置测试URL
+func (m *MVPTester) SetTestURL(testURL string) {
+	m.testURL = testURL
 }
 
 // Start 启动MVP测试器
@@ -392,24 +418,118 @@ func (m *MVPTester) testAllNodes(nodes []*types.Node) []types.ValidNode {
 	var mutex sync.Mutex
 	var wg sync.WaitGroup
 
-	// 限制并发数
-	concurrency := 3 // 减少并发数以提高成功率
+	// 使用用户通过SetConcurrency设置的并发数
+	concurrency := m.concurrency
+
+	// 如果并发数为0或过大，则使用平台相关的默认值作为安全后备
+	if concurrency <= 0 {
+		if runtime.GOOS == "windows" {
+			concurrency = 1 // Windows下默认单线程
+		} else {
+			concurrency = 2 // Unix环境默认2个并发
+		}
+		fmt.Printf("⚠️ 并发数未设置或无效，使用默认值: %d\n", concurrency)
+	} else {
+		fmt.Printf("🔧 使用设置的并发数: %d\n", concurrency)
+	}
+
+	// Windows环境提示
+	if runtime.GOOS == "windows" {
+		fmt.Printf("🪟 Windows环境：并发数 = %d\n", concurrency)
+	}
+
 	semaphore := make(chan struct{}, concurrency)
 
+	// 添加总体超时控制
+	totalTimeout := 30 * time.Minute // 总测试时间限制
+	if runtime.GOOS == "windows" {
+		totalTimeout = 45 * time.Minute // Windows下允许更长时间
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
+	defer cancel()
+
+	// 添加快速跳过机制
+	var consecutiveFailures int
+	var failureMutex sync.Mutex
+	maxConsecutiveFailures := 10 // 连续失败10个节点后，缩短测试时间
+
 	for i, node := range nodes {
+		// 检查是否超时
+		select {
+		case <-ctx.Done():
+			fmt.Printf("⏰ 总体测试超时，停止后续节点测试\n")
+			break
+		default:
+		}
+
+		// 检查是否应该快速跳过
+		failureMutex.Lock()
+		shouldFastFail := consecutiveFailures >= maxConsecutiveFailures
+		failureMutex.Unlock()
+
+		if shouldFastFail && runtime.GOOS == "windows" {
+			fmt.Printf("⚡ 连续失败过多，启用快速测试模式\n")
+		}
+
 		wg.Add(1)
-		go func(node *types.Node, index int) {
+		go func(node *types.Node, index int, fastFail bool) {
 			defer wg.Done()
 
 			// 获取信号量
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				fmt.Printf("❌ 节点 [%d/%d] %s: 测试超时取消\n", index+1, len(nodes), node.Name)
+				return
+			}
 
 			fmt.Printf("🧪 测试节点 [%d/%d]: %s (%s)\n",
 				index+1, len(nodes), node.Name, node.Protocol)
 
-			validNode := m.testSingleNode(node, 8000+index*10)
+			// 为单个节点测试添加超时，快速失败模式下缩短时间
+			nodeTimeout := 3 * time.Minute
+			if runtime.GOOS == "windows" {
+				if fastFail {
+					nodeTimeout = 1 * time.Minute // 快速失败模式
+				} else {
+					nodeTimeout = 5 * time.Minute // 正常模式
+				}
+			}
+
+			nodeCtx, nodeCancel := context.WithTimeout(ctx, nodeTimeout)
+			defer nodeCancel()
+
+			// 在goroutine中执行测试，以便可以被取消
+			resultChan := make(chan types.ValidNode, 1)
+			go func() {
+				result := m.testSingleNode(node, 8000+index*10)
+				select {
+				case resultChan <- result:
+				case <-nodeCtx.Done():
+				}
+			}()
+
+			var validNode types.ValidNode
+			select {
+			case validNode = <-resultChan:
+				// 测试完成
+			case <-nodeCtx.Done():
+				fmt.Printf("⏰ 节点 [%d/%d] %s: 单节点测试超时\n", index+1, len(nodes), node.Name)
+				// 记录失败
+				failureMutex.Lock()
+				consecutiveFailures++
+				failureMutex.Unlock()
+				return
+			}
+
 			if validNode.Node != nil {
+				// 成功，重置连续失败计数
+				failureMutex.Lock()
+				consecutiveFailures = 0
+				failureMutex.Unlock()
+
 				mutex.Lock()
 				validNodes = append(validNodes, validNode)
 
@@ -430,9 +550,23 @@ func (m *MVPTester) testAllNodes(nodes []*types.Node) []types.ValidNode {
 				fmt.Printf("✅ 节点 %s 测试通过 (延迟: %dms, 速度: %.2fMbps, 分数: %.2f)\n",
 					node.Name, validNode.Latency, validNode.Speed, validNode.Score)
 			} else {
+				// 失败，增加连续失败计数
+				failureMutex.Lock()
+				consecutiveFailures++
+				failureMutex.Unlock()
+
 				fmt.Printf("❌ 节点 %s 测试失败\n", node.Name)
 			}
-		}(node, i)
+		}(node, i, shouldFastFail)
+
+		// Windows环境在节点之间添加短暂延迟，但快速失败模式下减少延迟
+		if runtime.GOOS == "windows" && concurrency == 1 {
+			if shouldFastFail {
+				time.Sleep(500 * time.Millisecond) // 快速模式
+			} else {
+				time.Sleep(2 * time.Second) // 正常模式
+			}
+		}
 	}
 
 	wg.Wait()
@@ -459,8 +593,13 @@ func (m *MVPTester) testSingleNode(node *types.Node, portBase int) types.ValidNo
 
 // testV2RayNode 测试V2Ray节点
 func (m *MVPTester) testV2RayNode(node *types.Node, result types.ValidNode, portBase int) types.ValidNode {
+	fmt.Printf("  🔧 启动V2Ray代理测试...\n")
+
 	proxyManager := proxy.NewProxyManager()
-	defer proxyManager.StopProxy()
+	defer func() {
+		fmt.Printf("  🛑 清理V2Ray代理资源...\n")
+		proxyManager.StopProxy()
+	}()
 
 	httpPort := portBase + 1
 	socksPort := portBase + 2
@@ -472,21 +611,35 @@ func (m *MVPTester) testV2RayNode(node *types.Node, result types.ValidNode, port
 	proxyManager.HTTPPort = httpPort
 	proxyManager.SOCKSPort = socksPort
 
+	fmt.Printf("  🔧 配置代理端口: HTTP=%d, SOCKS=%d\n", httpPort, socksPort)
+
 	err := proxyManager.StartProxy(node)
 	if err != nil {
+		fmt.Printf("  ❌ V2Ray代理启动失败: %v\n", err)
 		return result
 	}
 
-	// 等待代理启动
-	time.Sleep(5 * time.Second)
+	// 等待代理启动 - Windows需要更长时间
+	waitTime := 5 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 8 * time.Second
+	}
+	fmt.Printf("  ⏳ 等待代理启动 (%.0fs)...\n", waitTime.Seconds())
+	time.Sleep(waitTime)
+
+	// 验证代理是否真正启动
+	if !m.verifyProxyStarted(httpPort) {
+		fmt.Printf("  ❌ V2Ray代理启动验证失败\n")
+		return result
+	}
 
 	// 测试连接性能
 	proxyTestURL := fmt.Sprintf("http://127.0.0.1:%d", httpPort)
-	fmt.Printf("🧪 测试V2Ray代理URL: %s\n", proxyTestURL)
+	fmt.Printf("  🧪 测试V2Ray代理URL: %s\n", proxyTestURL)
 
 	latency, speed, err := m.testProxyPerformance(proxyTestURL)
 	if err != nil {
-		fmt.Printf("❌ V2Ray代理性能测试失败: %v\n", err)
+		fmt.Printf("  ❌ V2Ray代理性能测试失败: %v\n", err)
 		return result
 	}
 
@@ -499,13 +652,19 @@ func (m *MVPTester) testV2RayNode(node *types.Node, result types.ValidNode, port
 	result.Score = score
 	result.SuccessCount = 1
 
+	fmt.Printf("  ✅ V2Ray节点测试成功\n")
 	return result
 }
 
 // testHysteria2Node 测试Hysteria2节点
 func (m *MVPTester) testHysteria2Node(node *types.Node, result types.ValidNode, portBase int) types.ValidNode {
+	fmt.Printf("  🔧 启动Hysteria2代理测试...\n")
+
 	hysteria2Manager := proxy.NewHysteria2ProxyManager()
-	defer hysteria2Manager.StopHysteria2Proxy()
+	defer func() {
+		fmt.Printf("  🛑 清理Hysteria2代理资源...\n")
+		hysteria2Manager.StopHysteria2Proxy()
+	}()
 
 	httpPort := portBase + 1
 	socksPort := portBase + 2
@@ -517,25 +676,35 @@ func (m *MVPTester) testHysteria2Node(node *types.Node, result types.ValidNode, 
 	hysteria2Manager.HTTPPort = httpPort
 	hysteria2Manager.SOCKSPort = socksPort
 
+	fmt.Printf("  🔧 配置代理端口: HTTP=%d, SOCKS=%d\n", httpPort, socksPort)
+
 	err := hysteria2Manager.StartHysteria2Proxy(node)
 	if err != nil {
+		fmt.Printf("  ❌ Hysteria2代理启动失败: %v\n", err)
 		return result
 	}
 
 	// 等待代理启动 - Windows需要更长时间
 	waitTime := 5 * time.Second
 	if runtime.GOOS == "windows" {
-		waitTime = 8 * time.Second
+		waitTime = 10 * time.Second // Hysteria2在Windows下需要更长启动时间
 	}
+	fmt.Printf("  ⏳ 等待代理启动 (%.0fs)...\n", waitTime.Seconds())
 	time.Sleep(waitTime)
+
+	// 验证代理是否真正启动
+	if !m.verifyProxyStarted(httpPort) {
+		fmt.Printf("  ❌ Hysteria2代理启动验证失败\n")
+		return result
+	}
 
 	// 测试连接性能
 	proxyTestURL := fmt.Sprintf("http://127.0.0.1:%d", httpPort)
-	fmt.Printf("🧪 测试Hysteria2代理URL: %s\n", proxyTestURL)
+	fmt.Printf("  🧪 测试Hysteria2代理URL: %s\n", proxyTestURL)
 
 	latency, speed, err := m.testProxyPerformance(proxyTestURL)
 	if err != nil {
-		fmt.Printf("❌ Hysteria2代理性能测试失败: %v\n", err)
+		fmt.Printf("  ❌ Hysteria2代理性能测试失败: %v\n", err)
 		return result
 	}
 
@@ -548,6 +717,7 @@ func (m *MVPTester) testHysteria2Node(node *types.Node, result types.ValidNode, 
 	result.Score = score
 	result.SuccessCount = 1
 
+	fmt.Printf("  ✅ Hysteria2节点测试成功\n")
 	return result
 }
 
@@ -581,20 +751,48 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 		return 0, 0, fmt.Errorf("创建代理函数失败")
 	}
 
+	// 使用配置中的超时时间，而不是硬编码
+	var dialTimeout, clientTimeout time.Duration
+
+	// 基于配置的超时时间计算各个阶段的超时
+	configTimeout := m.testTimeout
+	if configTimeout <= 0 {
+		configTimeout = 30 * time.Second // 默认值
+	}
+
+	if runtime.GOOS == "windows" {
+		// Windows环境使用配置的超时时间，但有最小值保证
+		dialTimeout = configTimeout / 4
+		if dialTimeout < 5*time.Second {
+			dialTimeout = 5 * time.Second
+		}
+		clientTimeout = configTimeout
+		if clientTimeout < 10*time.Second {
+			clientTimeout = 10 * time.Second
+		}
+	} else {
+		dialTimeout = configTimeout / 3
+		clientTimeout = configTimeout
+	}
+
+	fmt.Printf("  ⏱️ 使用超时配置: 连接超时=%.0fs, 总超时=%.0fs\n",
+		dialTimeout.Seconds(), clientTimeout.Seconds())
+
 	// 创建更健壮的Transport配置
 	transport := &http.Transport{
 		Proxy: proxyFunc,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   dialTimeout,
+			KeepAlive: 10 * time.Second, // 缩短Keep-Alive
 		}).DialContext,
-		ForceAttemptHTTP2:     false, // 禁用HTTP/2，避免兼容性问题
-		MaxIdleConns:          10,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
+		ForceAttemptHTTP2:     false,           // 禁用HTTP/2，避免兼容性问题
+		MaxIdleConns:          2,               // 进一步减少连接数
+		IdleConnTimeout:       5 * time.Second, // 大幅缩短空闲超时
+		TLSHandshakeTimeout:   8 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		DisableKeepAlives:     false,
+		DisableKeepAlives:     true, // Windows下禁用Keep-Alive避免连接复用问题
 		DisableCompression:    false,
+		ResponseHeaderTimeout: 10 * time.Second, // 缩短响应头超时
 	}
 
 	// 检查transport是否创建成功
@@ -602,20 +800,11 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 		return 0, 0, fmt.Errorf("创建传输层失败")
 	}
 
-	// Windows下使用更长的超时时间
-	timeout := 20 * time.Second
-	if runtime.GOOS == "windows" {
-		timeout = 45 * time.Second
-	}
-
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   timeout,
+		Timeout:   clientTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return fmt.Errorf("重定向次数过多")
-			}
-			return nil
+			return fmt.Errorf("禁止重定向") // 禁止重定向，简化测试
 		},
 	}
 
@@ -624,33 +813,41 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 		return 0, 0, fmt.Errorf("创建HTTP客户端失败")
 	}
 
-	// 根据系统环境选择测试URL
+	// 使用配置中的测试URL，如果没有配置则使用默认值
 	var testURLs []string
-	if runtime.GOOS == "windows" {
-		// Windows环境优先使用国内和稳定的URL
+	if m.testURL != "" {
+		// 用户配置了测试URL，优先使用
+		testURLs = []string{m.testURL}
+		fmt.Printf("  🎯 使用配置的测试URL: %s\n", m.testURL)
+	} else if runtime.GOOS == "windows" {
+		// Windows环境使用更简单、更快的测试URL
 		testURLs = []string{
-			"http://www.baidu.com",
-			"http://httpbin.org/ip",
-			"http://www.bing.com",
-			"http://www.github.com",
-			"http://www.google.com", // 放到最后尝试
+			"http://httpbin.org/get?test=1",               // 简单GET请求
+			"http://www.baidu.com/robots.txt",             // 小文件，国内快速
+			"http://captive.apple.com/hotspot-detect.txt", // 苹果连通性检测
 		}
+		fmt.Printf("  🪟 Windows环境：使用优化的测试URL列表\n")
 	} else {
-		// Unix环境使用原有策略
 		testURLs = []string{
 			"http://httpbin.org/ip",
 			"http://www.google.com",
-			"http://www.baidu.com",
-			"http://www.github.com",
 		}
+		fmt.Printf("  🌐 Unix环境：使用标准测试URL列表\n")
 	}
 
 	var lastErr error
-	for _, testURL := range testURLs {
-		// 对每个URL进行重试
-		maxRetries := 2
-		if runtime.GOOS == "windows" {
-			maxRetries = 3 // Windows下增加重试次数
+	for i, testURL := range testURLs {
+		fmt.Printf("🔍 尝试测试URL [%d/%d]: %s\n", i+1, len(testURLs), testURL)
+
+		// 为每个URL创建带超时的context - 使用更短的超时
+		shortTimeout := clientTimeout / 2 // 每个URL只用一半时间
+		ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+		defer cancel()
+
+		// Windows下只尝试一次，避免浪费时间
+		maxRetries := 1
+		if runtime.GOOS != "windows" {
+			maxRetries = 2
 		}
 
 		var resp *http.Response
@@ -658,11 +855,13 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 		var start time.Time
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
+			fmt.Printf("  🔄 尝试 %d/%d (超时%.0fs)...\n", attempt, maxRetries, shortTimeout.Seconds())
+
 			// 测试延迟
 			start = time.Now()
 
-			// 创建请求
-			req, err := http.NewRequest("GET", testURL, nil)
+			// 创建带context的请求
+			req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 			if err != nil {
 				lastErr = fmt.Errorf("创建请求失败: %v", err)
 				break
@@ -673,13 +872,10 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 				break
 			}
 
-			// 设置更兼容的请求头
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-			req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-			req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-			req.Header.Set("Accept-Encoding", "gzip, deflate")
-			req.Header.Set("Connection", "keep-alive")
-			req.Header.Set("Cache-Control", "no-cache")
+			// 设置最简化的请求头
+			req.Header.Set("User-Agent", "test/1.0")
+			req.Header.Set("Accept", "*/*")
+			req.Header.Set("Connection", "close")
 
 			// 检查客户端是否为空
 			if client == nil {
@@ -687,53 +883,107 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 				break
 			}
 
+			// 设置请求开始时间用于超时检测
+			requestStart := time.Now()
+
 			resp, err = client.Do(req)
+
+			// 检查是否超时
+			if time.Since(requestStart) > shortTimeout {
+				if resp != nil && resp.Body != nil {
+					resp.Body.Close()
+				}
+				lastErr = fmt.Errorf("请求超时 (%.1fs)", time.Since(requestStart).Seconds())
+				fmt.Printf("  ⏰ 请求超时，跳过\n")
+				break
+			}
+
 			if err == nil {
 				break // 成功，跳出重试循环
 			}
 
-			lastErr = fmt.Errorf("请求 %s 失败 (尝试 %d/%d): %v", testURL, attempt, maxRetries, err)
+			lastErr = fmt.Errorf("请求失败: %v", err)
+			fmt.Printf("  ❌ %v\n", lastErr)
 
-			// 如果不是最后一次尝试，等待一段时间再重试
+			// 如果不是最后一次尝试，短暂等待再重试
 			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt) * time.Second)
+				time.Sleep(500 * time.Millisecond) // 缩短重试间隔
 			}
 		}
 
 		if err != nil {
+			fmt.Printf("  ❌ URL %s 失败，尝试下一个\n", testURL)
 			continue // 这个URL失败，尝试下一个
 		}
 
 		// 检查响应是否为空
 		if resp == nil {
 			lastErr = fmt.Errorf("响应对象为空")
+			fmt.Printf("  ❌ %v\n", lastErr)
 			continue
 		}
 
 		latency := time.Since(start).Milliseconds()
 
-		if resp.StatusCode != http.StatusOK {
+		// 接受更多状态码，提高成功率
+		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 			if resp.Body != nil {
 				resp.Body.Close()
 			}
-			lastErr = fmt.Errorf("%s 返回状态码: %d", testURL, resp.StatusCode)
+			lastErr = fmt.Errorf("状态码: %d", resp.StatusCode)
+			fmt.Printf("  ❌ %v，尝试下一个URL\n", lastErr)
 			continue
 		}
 
-		// 测试速度 - 下载内容
+		// 简化速度测试 - 限制读取大小和时间
 		speedStart := time.Now()
 
 		// 检查响应体是否为空
 		if resp.Body == nil {
 			lastErr = fmt.Errorf("响应体为空")
+			fmt.Printf("  ❌ %v\n", lastErr)
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// 限制读取大小，避免下载过大内容
+		maxReadSize := int64(64 * 1024) // 最多读取64KB，减少读取量
+		limitedReader := io.LimitReader(resp.Body, maxReadSize)
+
+		// 设置更短的读取超时
+		readTimeout := 5 * time.Second
+		if runtime.GOOS == "windows" {
+			readTimeout = 8 * time.Second
+		}
+
+		readCtx, readCancel := context.WithTimeout(context.Background(), readTimeout)
+		defer readCancel()
+
+		// 在goroutine中读取，避免阻塞
+		type readResult struct {
+			data []byte
+			err  error
+		}
+
+		readChan := make(chan readResult, 1)
+		go func() {
+			data, err := io.ReadAll(limitedReader)
+			readChan <- readResult{data: data, err: err}
+		}()
+
+		var body []byte
+		select {
+		case result := <-readChan:
+			body = result.data
+			err = result.err
+		case <-readCtx.Done():
+			err = fmt.Errorf("读取响应超时")
+		}
+
 		resp.Body.Close()
 
 		if err != nil {
-			lastErr = fmt.Errorf("读取 %s 响应失败: %v", testURL, err)
+			lastErr = fmt.Errorf("读取响应失败: %v", err)
+			fmt.Printf("  ❌ %v\n", lastErr)
 			continue
 		}
 
@@ -745,7 +995,7 @@ func (m *MVPTester) testProxyPerformance(proxyURL string) (int64, float64, error
 		// 计算速度 (bytes/s -> Mbps)
 		speed := float64(len(body)) / downloadTime / 1024 / 1024 * 8
 
-		fmt.Printf("🌐 代理测试成功 - URL: %s, 延迟: %dms, 大小: %d bytes, 速度: %.2f Mbps\n",
+		fmt.Printf("  ✅ 代理测试成功 - URL: %s, 延迟: %dms, 大小: %d bytes, 速度: %.2f Mbps\n",
 			testURL, latency, len(body), speed)
 
 		return latency, speed, nil
@@ -870,4 +1120,17 @@ func (m *MVPTester) GetBestNode() *types.ValidNode {
 func RunMVPTester(subscriptionURL string) error {
 	tester := NewMVPTester(subscriptionURL)
 	return tester.Start()
+}
+
+// verifyProxyStarted 验证代理是否成功启动
+func (m *MVPTester) verifyProxyStarted(port int) bool {
+	// 尝试连接到代理端口
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 3*time.Second)
+	if err != nil {
+		fmt.Printf("    ❌ 无法连接到代理端口 %d: %v\n", port, err)
+		return false
+	}
+	conn.Close()
+	fmt.Printf("    ✅ 代理端口 %d 连接正常\n", port)
+	return true
 }

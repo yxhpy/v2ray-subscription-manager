@@ -477,8 +477,12 @@ func handleAutoProxy() {
 				config.TestConcurrency = concurrency
 			}
 		} else if strings.HasPrefix(arg, "--timeout=") {
-			if timeout, err := strconv.Atoi(strings.TrimPrefix(arg, "--timeout=")); err == nil {
-				config.TestTimeout = time.Duration(timeout) * time.Second
+			timeoutStr := strings.TrimPrefix(arg, "--timeout=")
+			if timeout, err := time.ParseDuration(timeoutStr); err == nil {
+				config.TestTimeout = timeout
+			} else {
+				fmt.Fprintf(os.Stderr, "❌ 无效的超时时间格式: %s (请使用如 30s, 2m 等格式)\n", timeoutStr)
+				os.Exit(1)
 			}
 		} else if strings.HasPrefix(arg, "--test-url=") {
 			config.TestURL = strings.TrimPrefix(arg, "--test-url=")
@@ -502,6 +506,23 @@ func handleAutoProxy() {
 		}
 	}
 
+	// 显示最终配置
+	fmt.Printf("📋 配置预览:\n")
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("🌐 HTTP代理端口: %d\n", config.HTTPPort)
+	fmt.Printf("🧦 SOCKS代理端口: %d\n", config.SOCKSPort)
+	fmt.Printf("⏰ 更新间隔: %v\n", config.UpdateInterval)
+	fmt.Printf("🔧 测试并发数: %d\n", config.TestConcurrency)
+	fmt.Printf("⏱️ 测试超时: %v\n", config.TestTimeout)
+	fmt.Printf("🎯 测试URL: %s\n", config.TestURL)
+	fmt.Printf("📊 最大节点数: %d\n", config.MaxNodes)
+	fmt.Printf("📈 最少通过节点: %d\n", config.MinPassingNodes)
+	fmt.Printf("🔄 自动切换: %t\n", config.EnableAutoSwitch)
+	fmt.Printf("📁 状态文件: %s\n", config.StateFile)
+	fmt.Printf("📝 有效节点文件: %s\n", config.ValidNodesFile)
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("\n")
+
 	// 创建并启动自动代理管理器
 	autoProxyManager = workflow.NewAutoProxyManager(config)
 
@@ -513,15 +534,8 @@ func handleAutoProxy() {
 
 	// 保持程序运行
 	fmt.Printf("✅ 自动代理管理器已启动！\n")
-	fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", config.HTTPPort)
-	fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", config.SOCKSPort)
-	fmt.Printf("⏰ 更新间隔: %v\n", config.UpdateInterval)
-	fmt.Printf("🔧 测试并发数: %d\n", config.TestConcurrency)
-	fmt.Printf("⏱️ 测试超时: %v\n", config.TestTimeout)
-	fmt.Printf("🎯 测试URL: %s\n", config.TestURL)
-	fmt.Printf("📊 最大节点数: %d\n", config.MaxNodes)
-	fmt.Printf("🔄 自动切换: %t\n", config.EnableAutoSwitch)
 	fmt.Printf("📝 按 Ctrl+C 停止服务\n")
+	fmt.Printf("\n")
 
 	// 阻塞等待
 	select {}
