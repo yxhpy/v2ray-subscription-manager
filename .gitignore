@@ -49,3 +49,7 @@ test_*.txt
 
 # 运行时文件
 *.pid
+
+# 依赖
+hysteria2/
+v2ray/
