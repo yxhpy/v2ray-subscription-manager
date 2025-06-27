@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/downloader"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/parser"
@@ -17,6 +18,7 @@ import (
 
 var proxyManager *proxy.ProxyManager
 var hysteria2Manager *proxy.Hysteria2ProxyManager
+var autoProxyManager *workflow.AutoProxyManager
 
 func init() {
 	proxyManager = proxy.NewProxyManager()
@@ -49,6 +51,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  speed-test <订阅链接>                - 测速工作流(默认配置)\n")
 		fmt.Fprintf(os.Stderr, "  speed-test-custom <订阅链接> [选项]   - 自定义测速工作流\n")
 		fmt.Fprintf(os.Stderr, "    选项格式: --concurrency=数量 --timeout=秒数 --output=文件名 --test-url=URL\n")
+		fmt.Fprintf(os.Stderr, "\n自动代理管理命令:\n")
+		fmt.Fprintf(os.Stderr, "  auto-proxy <订阅链接>                - 启动自动代理管理器\n")
+		fmt.Fprintf(os.Stderr, "  auto-proxy-config <订阅链接> [选项]   - 自定义自动代理配置\n")
+		fmt.Fprintf(os.Stderr, "    选项格式: --http-port=端口 --socks-port=端口 --interval=分钟 --concurrency=数量\n")
+		fmt.Fprintf(os.Stderr, "  auto-proxy-status                   - 查看自动代理状态\n")
+		fmt.Fprintf(os.Stderr, "  auto-proxy-stop                     - 停止自动代理管理器\n")
+		fmt.Fprintf(os.Stderr, "  auto-proxy-blacklist                - 查看和管理节点黑名单\n")
 		fmt.Fprintf(os.Stderr, "\n示例:\n")
 		fmt.Fprintf(os.Stderr, "  %s parse https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s start-proxy random https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
@@ -56,6 +65,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s download-v2ray\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s speed-test https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s speed-test-custom https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2 --concurrency=5 --timeout=20\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auto-proxy https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auto-proxy-config https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2 --http-port=7890 --interval=15\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -204,6 +215,21 @@ func main() {
 
 	case "speed-test-custom":
 		handleSpeedTestCustom()
+
+	case "auto-proxy":
+		handleAutoProxy()
+
+	case "auto-proxy-config":
+		handleAutoProxyConfig()
+
+	case "auto-proxy-status":
+		handleAutoProxyStatus()
+
+	case "auto-proxy-stop":
+		handleAutoProxyStop()
+
+	case "auto-proxy-blacklist":
+		handleAutoProxyBlacklist()
 
 	default:
 		fmt.Fprintf(os.Stderr, "未知命令: %s\n", command)
@@ -382,5 +408,282 @@ func handleSpeedTestCustom() {
 	if err := workflow.RunCustomSpeedTestWorkflow(subscriptionURL, concurrency, timeout, outputFile, testURL, maxNodes); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 自定义测速工作流失败: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// handleAutoProxy 处理自动代理命令
+func handleAutoProxy() {
+	if len(os.Args) != 3 {
+		fmt.Fprintf(os.Stderr, "使用方法: %s auto-proxy <订阅链接>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "示例: %s auto-proxy https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	subscriptionURL := os.Args[2]
+
+	// 创建默认配置
+	config := types.AutoProxyConfig{
+		SubscriptionURL:  subscriptionURL,
+		HTTPPort:         7890,
+		SOCKSPort:        7891,
+		UpdateInterval:   10 * time.Minute,
+		TestConcurrency:  20,
+		TestTimeout:      30 * time.Second,
+		TestURL:          "http://www.google.com",
+		MaxNodes:         100,
+		MinPassingNodes:  5,
+		StateFile:        "./auto_proxy_state.json",
+		ValidNodesFile:   "./valid_nodes.json",
+		EnableAutoSwitch: true,
+	}
+
+	// 创建并启动自动代理管理器
+	autoProxyManager = workflow.NewAutoProxyManager(config)
+
+	fmt.Printf("🚀 启动自动代理管理器...\n")
+	if err := autoProxyManager.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 启动自动代理失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 保持程序运行
+	fmt.Printf("✅ 自动代理管理器已启动！\n")
+	fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", config.HTTPPort)
+	fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", config.SOCKSPort)
+	fmt.Printf("⏰ 更新间隔: %v\n", config.UpdateInterval)
+	fmt.Printf("📝 按 Ctrl+C 停止服务\n")
+
+	// 阻塞等待
+	select {}
+}
+
+// handleAutoProxyConfig 处理自定义自动代理配置命令
+func handleAutoProxyConfig() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "使用方法: %s auto-proxy-config <订阅链接> [选项]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "选项:\n")
+		fmt.Fprintf(os.Stderr, "  --http-port=端口      HTTP代理端口 (默认: 7890)\n")
+		fmt.Fprintf(os.Stderr, "  --socks-port=端口     SOCKS代理端口 (默认: 7891)\n")
+		fmt.Fprintf(os.Stderr, "  --interval=分钟       更新间隔分钟数 (默认: 10)\n")
+		fmt.Fprintf(os.Stderr, "  --concurrency=数量    测试并发数 (默认: 20)\n")
+		fmt.Fprintf(os.Stderr, "  --timeout=秒数        测试超时秒数 (默认: 30)\n")
+		fmt.Fprintf(os.Stderr, "  --test-url=URL        测试URL (默认: http://www.google.com)\n")
+		fmt.Fprintf(os.Stderr, "  --max-nodes=数量      最大测试节点数 (默认: 100)\n")
+		fmt.Fprintf(os.Stderr, "  --no-auto-switch      禁用自动切换\n")
+		os.Exit(1)
+	}
+
+	subscriptionURL := os.Args[2]
+
+	// 创建默认配置
+	config := types.AutoProxyConfig{
+		SubscriptionURL:  subscriptionURL,
+		HTTPPort:         7890,
+		SOCKSPort:        7891,
+		UpdateInterval:   10 * time.Minute,
+		TestConcurrency:  20,
+		TestTimeout:      30 * time.Second,
+		TestURL:          "http://www.google.com",
+		MaxNodes:         100,
+		MinPassingNodes:  5,
+		StateFile:        "./auto_proxy_state.json",
+		ValidNodesFile:   "./valid_nodes.json",
+		EnableAutoSwitch: true,
+	}
+
+	// 解析自定义选项
+	for i := 3; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if strings.HasPrefix(arg, "--http-port=") {
+			if port, err := strconv.Atoi(strings.TrimPrefix(arg, "--http-port=")); err == nil {
+				config.HTTPPort = port
+			}
+		} else if strings.HasPrefix(arg, "--socks-port=") {
+			if port, err := strconv.Atoi(strings.TrimPrefix(arg, "--socks-port=")); err == nil {
+				config.SOCKSPort = port
+			}
+		} else if strings.HasPrefix(arg, "--interval=") {
+			if minutes, err := strconv.Atoi(strings.TrimPrefix(arg, "--interval=")); err == nil {
+				config.UpdateInterval = time.Duration(minutes) * time.Minute
+			}
+		} else if strings.HasPrefix(arg, "--concurrency=") {
+			if concurrency, err := strconv.Atoi(strings.TrimPrefix(arg, "--concurrency=")); err == nil {
+				config.TestConcurrency = concurrency
+			}
+		} else if strings.HasPrefix(arg, "--timeout=") {
+			if timeout, err := strconv.Atoi(strings.TrimPrefix(arg, "--timeout=")); err == nil {
+				config.TestTimeout = time.Duration(timeout) * time.Second
+			}
+		} else if strings.HasPrefix(arg, "--test-url=") {
+			config.TestURL = strings.TrimPrefix(arg, "--test-url=")
+		} else if strings.HasPrefix(arg, "--max-nodes=") {
+			if maxNodes, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-nodes=")); err == nil {
+				config.MaxNodes = maxNodes
+			}
+		} else if arg == "--no-auto-switch" {
+			config.EnableAutoSwitch = false
+		}
+	}
+
+	// 创建并启动自动代理管理器
+	autoProxyManager = workflow.NewAutoProxyManager(config)
+
+	fmt.Printf("🚀 启动自动代理管理器（自定义配置）...\n")
+	if err := autoProxyManager.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 启动自动代理失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 保持程序运行
+	fmt.Printf("✅ 自动代理管理器已启动！\n")
+	fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", config.HTTPPort)
+	fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", config.SOCKSPort)
+	fmt.Printf("⏰ 更新间隔: %v\n", config.UpdateInterval)
+	fmt.Printf("🔧 测试并发数: %d\n", config.TestConcurrency)
+	fmt.Printf("⏱️ 测试超时: %v\n", config.TestTimeout)
+	fmt.Printf("🎯 测试URL: %s\n", config.TestURL)
+	fmt.Printf("📊 最大节点数: %d\n", config.MaxNodes)
+	fmt.Printf("🔄 自动切换: %t\n", config.EnableAutoSwitch)
+	fmt.Printf("📝 按 Ctrl+C 停止服务\n")
+
+	// 阻塞等待
+	select {}
+}
+
+// handleAutoProxyStatus 处理查看自动代理状态命令
+func handleAutoProxyStatus() {
+	// 尝试从状态文件读取状态
+	stateFile := "./auto_proxy_state.json"
+	if data, err := os.ReadFile(stateFile); err == nil {
+		var state types.AutoProxyState
+		if err := json.Unmarshal(data, &state); err == nil {
+			fmt.Printf("📊 自动代理系统状态:\n")
+			fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+			fmt.Printf("🔄 运行状态: %t\n", state.Running)
+			fmt.Printf("⏰ 启动时间: %s\n", state.StartTime.Format("2006-01-02 15:04:05"))
+			fmt.Printf("🔄 最后更新: %s\n", state.LastUpdate.Format("2006-01-02 15:04:05"))
+			fmt.Printf("📊 总测试次数: %d\n", state.TotalTests)
+			fmt.Printf("✅ 成功测试次数: %d\n", state.SuccessfulTests)
+
+			if state.CurrentNode != nil {
+				fmt.Printf("📡 当前节点: %s (%s)\n", state.CurrentNode.Name, state.CurrentNode.Protocol)
+				fmt.Printf("🌐 HTTP代理: http://127.0.0.1:%d\n", state.Config.HTTPPort)
+				fmt.Printf("🧦 SOCKS代理: socks5://127.0.0.1:%d\n", state.Config.SOCKSPort)
+			} else {
+				fmt.Printf("📡 当前节点: 无\n")
+			}
+
+			if len(state.ValidNodes) > 0 {
+				fmt.Printf("✅ 有效节点数: %d\n", len(state.ValidNodes))
+				fmt.Printf("🏆 前3个最佳节点:\n")
+				for i, node := range state.ValidNodes {
+					if i >= 3 {
+						break
+					}
+					fmt.Printf("  [%d] %s (评分:%.1f 延迟:%dms 速度:%.2fMbps)\n",
+						i+1, node.Node.Name, node.Score, node.Latency, node.Speed)
+				}
+			} else {
+				fmt.Printf("❌ 有效节点数: 0\n")
+			}
+
+			// 显示黑名单状态（如果有运行中的管理器实例）
+			if autoProxyManager != nil {
+				blacklist := autoProxyManager.GetBlacklistStatus()
+				if len(blacklist) > 0 {
+					fmt.Printf("🚫 黑名单节点数: %d\n", len(blacklist))
+					fmt.Printf("🚫 黑名单节点:\n")
+					for nodeKey, expireTime := range blacklist {
+						remaining := time.Until(expireTime)
+						if remaining > 0 {
+							fmt.Printf("  - %s (剩余: %v)\n", nodeKey, remaining.Round(time.Minute))
+						}
+					}
+				} else {
+					fmt.Printf("🚫 黑名单节点数: 0\n")
+				}
+			}
+
+			if state.LastError != "" {
+				fmt.Printf("⚠️ 最后错误: %s\n", state.LastError)
+			}
+
+			fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "❌ 解析状态文件失败: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "❌ 读取状态文件失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "💡 自动代理管理器可能未运行或未初始化\n")
+	}
+}
+
+// handleAutoProxyStop 处理停止自动代理命令
+func handleAutoProxyStop() {
+	// 如果有正在运行的管理器实例，停止它
+	if autoProxyManager != nil {
+		fmt.Printf("🛑 停止自动代理管理器...\n")
+		if err := autoProxyManager.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 停止失败: %v\n", err)
+		} else {
+			fmt.Printf("✅ 自动代理管理器已停止\n")
+		}
+		return
+	}
+
+	// 否则尝试停止可能运行的代理进程
+	fmt.Printf("🛑 尝试停止可能运行的代理进程...\n")
+
+	// 停止V2Ray代理
+	if proxyManager != nil {
+		proxyManager.StopProxy()
+	}
+
+	// 停止Hysteria2代理
+	if hysteria2Manager != nil {
+		hysteria2Manager.StopHysteria2Proxy()
+	}
+
+	fmt.Printf("✅ 代理进程停止操作完成\n")
+}
+
+// handleAutoProxyBlacklist 处理黑名单管理命令
+func handleAutoProxyBlacklist() {
+	if autoProxyManager == nil {
+		fmt.Fprintf(os.Stderr, "❌ 自动代理管理器未运行\n")
+		fmt.Fprintf(os.Stderr, "💡 请先启动自动代理管理器\n")
+		os.Exit(1)
+	}
+
+	blacklist := autoProxyManager.GetBlacklistStatus()
+
+	if len(blacklist) == 0 {
+		fmt.Printf("✅ 当前没有节点在黑名单中\n")
+		return
+	}
+
+	fmt.Printf("🚫 节点黑名单状态:\n")
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+	activeCount := 0
+	expiredCount := 0
+
+	for nodeKey, expireTime := range blacklist {
+		remaining := time.Until(expireTime)
+		if remaining > 0 {
+			activeCount++
+			fmt.Printf("🚫 %s\n", nodeKey)
+			fmt.Printf("   解禁时间: %s (剩余: %v)\n",
+				expireTime.Format("15:04:05"), remaining.Round(time.Minute))
+		} else {
+			expiredCount++
+		}
+	}
+
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("📊 统计: 活跃黑名单 %d 个，已过期 %d 个\n", activeCount, expiredCount)
+
+	if expiredCount > 0 {
+		fmt.Printf("💡 过期的黑名单条目将在下次清理时自动移除\n")
 	}
 }
