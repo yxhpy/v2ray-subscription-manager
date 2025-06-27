@@ -9,10 +9,12 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
-// fetchSubscription 从URL获取订阅内容
-func fetchSubscription(url string) (string, error) {
+// FetchSubscription 从URL获取订阅内容
+func FetchSubscription(url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("获取订阅失败: %v", err)
@@ -31,8 +33,8 @@ func fetchSubscription(url string) (string, error) {
 	return string(body), nil
 }
 
-// decodeBase64 智能解码base64内容
-func decodeBase64(content string) (string, error) {
+// DecodeBase64 智能解码base64内容
+func DecodeBase64(content string) (string, error) {
 	// 去除空白字符
 	content = strings.TrimSpace(content)
 
@@ -434,8 +436,8 @@ func parseTrojan(link string) (*types.Node, error) {
 	}, nil
 }
 
-// parseLinks 解析所有链接
-func parseLinks(content string) ([]*types.Node, error) {
+// ParseLinks 解析所有链接
+func ParseLinks(content string) ([]*types.Node, error) {
 	var nodes []*types.Node
 	var errors []string
 
@@ -495,21 +497,21 @@ func min(a, b int) int {
 func ParseSubscription(subscriptionURL string) error {
 	// 获取订阅内容
 	fmt.Fprintf(os.Stderr, "正在获取订阅内容...\n")
-	content, err := fetchSubscription(subscriptionURL)
+	content, err := FetchSubscription(subscriptionURL)
 	if err != nil {
 		return fmt.Errorf("获取订阅失败: %v", err)
 	}
 
 	// 解码base64
 	fmt.Fprintf(os.Stderr, "正在解码内容...\n")
-	decoded, err := decodeBase64(content)
+	decoded, err := DecodeBase64(content)
 	if err != nil {
 		return fmt.Errorf("解码失败: %v", err)
 	}
 
 	// 解析所有链接
 	fmt.Fprintf(os.Stderr, "正在解析链接...\n")
-	nodes, err := parseLinks(decoded)
+	nodes, err := ParseLinks(decoded)
 	if err != nil {
 		return fmt.Errorf("解析失败: %v", err)
 	}

@@ -23,7 +23,7 @@ type Hysteria2ProxyManager struct {
 
 // NewHysteria2ProxyManager 创建新的Hysteria2代理管理器
 func NewHysteria2ProxyManager() *Hysteria2ProxyManager {
-	downloader := NewHysteria2Downloader()
+	downloader := downloader.NewHysteria2Downloader()
 	// 为每个实例生成唯一的配置文件路径
 	downloader.ConfigPath = fmt.Sprintf("./hysteria2/config_%d.yaml", time.Now().UnixNano())
 

@@ -18,16 +18,21 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/downloader"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/parser"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/proxy"
+	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
 // SpeedTestResult 测速结果
 type SpeedTestResult struct {
-	Node     *Node     `json:"node"`
-	Success  bool      `json:"success"`
-	Latency  int64     `json:"latency_ms"` // 延迟毫秒
-	Error    string    `json:"error,omitempty"`
-	TestTime time.Time `json:"test_time"`
-	Speed    float64   `json:"speed_mbps"` // 速度 Mbps
+	Node     *types.Node `json:"node"`
+	Success  bool        `json:"success"`
+	Latency  int64       `json:"latency_ms"` // 延迟毫秒
+	Error    string      `json:"error,omitempty"`
+	TestTime time.Time   `json:"test_time"`
+	Speed    float64     `json:"speed_mbps"` // 速度 Mbps
 }
 
 // WorkflowConfig 工作流配置
@@ -56,7 +61,7 @@ type ProxyManagerInterface interface {
 
 // ProxyManagerWrapper V2Ray代理管理器包装器
 type ProxyManagerWrapper struct {
-	*ProxyManager
+	*proxy.ProxyManager
 }
 
 func (p *ProxyManagerWrapper) Stop() error {
@@ -65,7 +70,7 @@ func (p *ProxyManagerWrapper) Stop() error {
 
 // Hysteria2ProxyManagerWrapper Hysteria2代理管理器包装器
 type Hysteria2ProxyManagerWrapper struct {
-	*Hysteria2ProxyManager
+	*proxy.Hysteria2ProxyManager
 }
 
 func (h *Hysteria2ProxyManagerWrapper) Stop() error {
@@ -306,24 +311,13 @@ func (w *SpeedTestWorkflow) cleanupAdditionalTempFiles() {
 	}
 }
 
-// cleanupHysteria2TempFiles 清理Hysteria2临时配置文件
-func (w *SpeedTestWorkflow) cleanupHysteria2TempFiles(manager *Hysteria2ProxyManager) {
+// cleanupHysteria2TempFiles 清理Hysteria2临时文件
+func (w *SpeedTestWorkflow) cleanupHysteria2TempFiles(manager *proxy.Hysteria2ProxyManager) {
 	if manager == nil {
 		return
 	}
 
-	// 清理管理器的配置文件
-	if manager.Downloader != nil && manager.Downloader.ConfigPath != "" {
-		configPath := manager.Downloader.ConfigPath
-		if err := os.Remove(configPath); err != nil {
-			// 忽略文件不存在的错误
-			if !os.IsNotExist(err) {
-				fmt.Printf("⚠️  清理Hysteria2配置文件失败 %s: %v\n", configPath, err)
-			}
-		} else {
-			fmt.Printf("🧹 已清理Hysteria2配置文件: %s\n", configPath)
-		}
-	}
+	// 由于downloader字段是私有的，我们直接清理可能的临时配置文件
 
 	// 清理可能的临时配置文件（使用多种模式匹配）
 	patterns := []string{
@@ -383,29 +377,25 @@ func (w *SpeedTestWorkflow) cleanupWindowsHysteria2Files() {
 // checkAndInstallDependencies 检查和安装必要依赖
 func (w *SpeedTestWorkflow) checkAndInstallDependencies() error {
 	fmt.Printf("🔍 检查V2Ray核心...\n")
-
-	// 检查V2Ray
-	downloader := NewV2RayDownloader()
-	if !downloader.CheckV2rayInstalled() {
-		fmt.Printf("❌ V2Ray未安装，正在自动下载安装...\n")
-		if err := AutoDownloadV2Ray(); err != nil {
-			return fmt.Errorf("V2Ray安装失败: %v", err)
+	v2rayDownloader := downloader.NewV2RayDownloader()
+	if !v2rayDownloader.CheckV2rayInstalled() {
+		fmt.Printf("📥 V2Ray未安装，正在下载...\n")
+		if err := downloader.AutoDownloadV2Ray(); err != nil {
+			return fmt.Errorf("V2Ray下载失败: %v", err)
 		}
-		fmt.Printf("✅ V2Ray安装成功\n")
+		fmt.Printf("✅ V2Ray安装完成\n")
 	} else {
 		fmt.Printf("✅ V2Ray已安装\n")
 	}
 
 	fmt.Printf("🔍 检查Hysteria2客户端...\n")
-
-	// 检查Hysteria2
-	hysteria2Downloader := NewHysteria2Downloader()
+	hysteria2Downloader := downloader.NewHysteria2Downloader()
 	if !hysteria2Downloader.CheckHysteria2Installed() {
-		fmt.Printf("❌ Hysteria2未安装，正在自动下载安装...\n")
-		if err := AutoDownloadHysteria2(); err != nil {
-			return fmt.Errorf("Hysteria2安装失败: %v", err)
+		fmt.Printf("📥 Hysteria2未安装，正在下载...\n")
+		if err := downloader.AutoDownloadHysteria2(); err != nil {
+			return fmt.Errorf("Hysteria2下载失败: %v", err)
 		}
-		fmt.Printf("✅ Hysteria2安装成功\n")
+		fmt.Printf("✅ Hysteria2安装完成\n")
 	} else {
 		fmt.Printf("✅ Hysteria2已安装\n")
 	}
@@ -414,21 +404,21 @@ func (w *SpeedTestWorkflow) checkAndInstallDependencies() error {
 }
 
 // parseSubscription 解析订阅链接
-func (w *SpeedTestWorkflow) parseSubscription() ([]*Node, error) {
+func (w *SpeedTestWorkflow) parseSubscription() ([]*types.Node, error) {
 	// 获取订阅内容
-	content, err := fetchSubscription(w.config.SubscriptionURL)
+	content, err := parser.FetchSubscription(w.config.SubscriptionURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// 解码base64
-	decoded, err := decodeBase64(content)
+	// Base64解码
+	decodedContent, err := parser.DecodeBase64(content)
 	if err != nil {
-		return nil, fmt.Errorf("解码失败: %v", err)
+		return nil, err
 	}
 
 	// 解析链接
-	nodes, err := parseLinks(decoded)
+	nodes, err := parser.ParseLinks(decodedContent)
 	if err != nil {
 		return nil, err
 	}
@@ -447,9 +437,9 @@ func (w *SpeedTestWorkflow) parseSubscription() ([]*Node, error) {
 }
 
 // testAllNodes 多线程测试所有节点
-func (w *SpeedTestWorkflow) testAllNodes(nodes []*Node) error {
+func (w *SpeedTestWorkflow) testAllNodes(nodes []*types.Node) error {
 	// 创建工作队列
-	nodeQueue := make(chan *Node, len(nodes))
+	nodeQueue := make(chan *types.Node, len(nodes))
 	resultQueue := make(chan SpeedTestResult, len(nodes))
 
 	// 填充工作队列
@@ -492,7 +482,7 @@ func (w *SpeedTestWorkflow) testAllNodes(nodes []*Node) error {
 }
 
 // worker 工作协程
-func (w *SpeedTestWorkflow) worker(nodeQueue <-chan *Node, resultQueue chan<- SpeedTestResult, wg *sync.WaitGroup, portBase int) {
+func (w *SpeedTestWorkflow) worker(nodeQueue <-chan *types.Node, resultQueue chan<- SpeedTestResult, wg *sync.WaitGroup, portBase int) {
 	defer wg.Done()
 
 	for node := range nodeQueue {
@@ -502,7 +492,7 @@ func (w *SpeedTestWorkflow) worker(nodeQueue <-chan *Node, resultQueue chan<- Sp
 }
 
 // testSingleNode 测试单个节点
-func (w *SpeedTestWorkflow) testSingleNode(node *Node, portBase int) SpeedTestResult {
+func (w *SpeedTestWorkflow) testSingleNode(node *types.Node, portBase int) SpeedTestResult {
 	result := SpeedTestResult{
 		Node:     node,
 		Success:  false,
@@ -518,9 +508,9 @@ func (w *SpeedTestWorkflow) testSingleNode(node *Node, portBase int) SpeedTestRe
 }
 
 // testV2RayNode 使用V2Ray测试节点
-func (w *SpeedTestWorkflow) testV2RayNode(node *Node, result SpeedTestResult, portBase int) SpeedTestResult {
+func (w *SpeedTestWorkflow) testV2RayNode(node *types.Node, result SpeedTestResult, portBase int) SpeedTestResult {
 	// 创建临时V2Ray代理管理器
-	tempManager := NewProxyManager()
+	tempManager := proxy.NewProxyManager()
 	tempManager.ConfigPath = fmt.Sprintf("temp_config_%s_%d.json", node.Protocol, time.Now().UnixNano())
 
 	// 设置专用端口，避免冲突
@@ -569,9 +559,9 @@ func (w *SpeedTestWorkflow) testV2RayNode(node *Node, result SpeedTestResult, po
 }
 
 // testHysteria2Node 使用Hysteria2客户端测试节点
-func (w *SpeedTestWorkflow) testHysteria2Node(node *Node, result SpeedTestResult, portBase int) SpeedTestResult {
+func (w *SpeedTestWorkflow) testHysteria2Node(node *types.Node, result SpeedTestResult, portBase int) SpeedTestResult {
 	// 创建临时Hysteria2代理管理器
-	tempHysteria2Manager := NewHysteria2ProxyManager()
+	tempHysteria2Manager := proxy.NewHysteria2ProxyManager()
 
 	// 设置专用端口，避免冲突
 	tempHysteria2Manager.HTTPPort = portBase + 3  // HTTP代理端口
@@ -792,7 +782,7 @@ func (w *SpeedTestWorkflow) showSummary() {
 	totalSpeed := 0.0
 	fastestSpeed := 0.0
 	slowestSpeed := float64(^uint(0) >> 1) // 最大float64
-	var fastestNode, slowestNode *Node
+	var fastestNode, slowestNode *types.Node
 
 	for _, result := range w.results {
 		if result.Success {

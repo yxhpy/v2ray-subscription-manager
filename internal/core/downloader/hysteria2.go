@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
 // 全局互斥锁，防止并发下载 Hysteria2
@@ -314,7 +316,7 @@ func (h *Hysteria2Downloader) validateWindowsExecutable(filePath string) error {
 }
 
 // GenerateHysteria2Config 生成Hysteria2配置文件
-func (h *Hysteria2Downloader) GenerateHysteria2Config(node *Node, httpPort int, socksPort int) error {
+func (h *Hysteria2Downloader) GenerateHysteria2Config(node *types.Node, httpPort int, socksPort int) error {
 	// 解析服务器和端口
 	server := node.Server
 	port := node.Port

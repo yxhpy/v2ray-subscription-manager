@@ -8,15 +8,19 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/downloader"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/parser"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/proxy"
+	"github.com/yxhpy/v2ray-subscription-manager/internal/core/workflow"
+	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
 
-var proxyManager *proxy.Manager
-var hysteria2Manager *proxy.Hysteria2Manager
+var proxyManager *proxy.ProxyManager
+var hysteria2Manager *proxy.Hysteria2ProxyManager
 
 func init() {
-	proxyManager = proxy.NewManager()
-	hysteria2Manager = proxy.NewHysteria2Manager()
+	proxyManager = proxy.NewProxyManager()
+	hysteria2Manager = proxy.NewHysteria2ProxyManager()
 }
 
 func main() {
@@ -64,7 +68,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "示例: %s parse https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
 			os.Exit(1)
 		}
-		if err := ParseSubscription(os.Args[2]); err != nil {
+		if err := parser.ParseSubscription(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 			os.Exit(1)
 		}
@@ -110,7 +114,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "❌ 获取节点失败: %v\n", err)
 			os.Exit(1)
 		}
-		ListNodes(nodes)
+		proxy.ListNodes(nodes)
 
 	case "test-proxy":
 		if err := proxyManager.TestProxy(); err != nil {
@@ -121,17 +125,17 @@ func main() {
 
 	case "download-v2ray":
 		fmt.Println("=== V2Ray核心自动下载器 ===")
-		if err := AutoDownloadV2Ray(); err != nil {
+		if err := downloader.AutoDownloadV2Ray(); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 下载安装失败: %v\n", err)
 			os.Exit(1)
 		}
 
 	case "check-v2ray":
 		fmt.Println("=== 检查V2Ray安装状态 ===")
-		downloader := NewV2RayDownloader()
-		if downloader.CheckV2rayInstalled() {
+		v2rayDownloader := downloader.NewV2RayDownloader()
+		if v2rayDownloader.CheckV2rayInstalled() {
 			fmt.Println("✅ V2Ray已安装")
-			downloader.ShowV2rayVersion()
+			v2rayDownloader.ShowV2rayVersion()
 		} else {
 			fmt.Println("❌ V2Ray未安装")
 			fmt.Printf("运行 '%s download-v2ray' 来安装\n", os.Args[0])
@@ -140,17 +144,17 @@ func main() {
 
 	case "download-hysteria2":
 		fmt.Println("=== Hysteria2客户端自动下载器 ===")
-		if err := AutoDownloadHysteria2(); err != nil {
+		if err := downloader.AutoDownloadHysteria2(); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 下载安装失败: %v\n", err)
 			os.Exit(1)
 		}
 
 	case "check-hysteria2":
 		fmt.Println("=== 检查Hysteria2安装状态 ===")
-		downloader := NewHysteria2Downloader()
-		if downloader.CheckHysteria2Installed() {
+		hysteria2Downloader := downloader.NewHysteria2Downloader()
+		if hysteria2Downloader.CheckHysteria2Installed() {
 			fmt.Println("✅ Hysteria2已安装")
-			downloader.ShowHysteria2Version()
+			hysteria2Downloader.ShowHysteria2Version()
 		} else {
 			fmt.Println("❌ Hysteria2未安装")
 			fmt.Printf("运行 '%s download-hysteria2' 来安装\n", os.Args[0])
@@ -193,7 +197,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "示例: %s speed-test https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\n", os.Args[0])
 			os.Exit(1)
 		}
-		if err := RunSpeedTestWorkflow(os.Args[2]); err != nil {
+		if err := workflow.RunSpeedTestWorkflow(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 测速工作流失败: %v\n", err)
 			os.Exit(1)
 		}
@@ -305,21 +309,21 @@ func handleStartHysteria2() {
 }
 
 // getNodesFromSubscription 从订阅链接获取节点列表
-func getNodesFromSubscription(subscriptionURL string) ([]*Node, error) {
+func getNodesFromSubscription(subscriptionURL string) ([]*types.Node, error) {
 	// 获取订阅内容
-	content, err := fetchSubscription(subscriptionURL)
+	content, err := parser.FetchSubscription(subscriptionURL)
 	if err != nil {
 		return nil, fmt.Errorf("获取订阅失败: %v", err)
 	}
 
 	// 解码base64
-	decoded, err := decodeBase64(content)
+	decoded, err := parser.DecodeBase64(content)
 	if err != nil {
 		return nil, fmt.Errorf("解码失败: %v", err)
 	}
 
 	// 解析所有链接
-	nodes, err := parseLinks(decoded)
+	nodes, err := parser.ParseLinks(decoded)
 	if err != nil {
 		return nil, fmt.Errorf("解析失败: %v", err)
 	}
@@ -375,7 +379,7 @@ func handleSpeedTestCustom() {
 		}
 	}
 
-	if err := RunCustomSpeedTestWorkflow(subscriptionURL, concurrency, timeout, outputFile, testURL, maxNodes); err != nil {
+	if err := workflow.RunCustomSpeedTestWorkflow(subscriptionURL, concurrency, timeout, outputFile, testURL, maxNodes); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 自定义测速工作流失败: %v\n", err)
 		os.Exit(1)
 	}
