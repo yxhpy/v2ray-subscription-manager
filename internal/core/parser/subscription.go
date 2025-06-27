@@ -234,7 +234,16 @@ func parseSS(link string) (*types.Node, error) {
 			password = methodPassword[colonIndex+1:]
 		} else {
 			// 可能是base64编码的部分
-			decoded, err := base64.StdEncoding.DecodeString(methodPassword)
+			var decoded []byte
+			var err error
+
+			// 先尝试RawStdEncoding（无padding）
+			decoded, err = base64.RawStdEncoding.DecodeString(methodPassword)
+			if err != nil {
+				// 如果失败，尝试标准编码
+				decoded, err = base64.StdEncoding.DecodeString(methodPassword)
+			}
+
 			if err == nil {
 				decodedStr := string(decoded)
 				colonIndex := strings.Index(decodedStr, ":")
@@ -253,7 +262,16 @@ func parseSS(link string) (*types.Node, error) {
 		}
 	} else {
 		// 尝试整体base64解码
-		decoded, err := base64.StdEncoding.DecodeString(addressPart)
+		var decoded []byte
+		var err error
+
+		// 先尝试RawStdEncoding（无padding）
+		decoded, err = base64.RawStdEncoding.DecodeString(addressPart)
+		if err != nil {
+			// 如果失败，尝试标准编码
+			decoded, err = base64.StdEncoding.DecodeString(addressPart)
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("ss链接解码失败: %v", err)
 		}

@@ -26,31 +26,31 @@ echo "正在构建..."
 
 # Linux amd64
 echo "构建 Linux amd64..."
-GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-linux-amd64 .
+GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-linux-amd64 ./cmd/v2ray-manager
 
 # Linux arm64
 echo "构建 Linux arm64..."
-GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-linux-arm64 .
+GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-linux-arm64 ./cmd/v2ray-manager
 
 # macOS amd64
 echo "构建 macOS amd64..."
-GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-darwin-amd64 .
+GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-darwin-amd64 ./cmd/v2ray-manager
 
 # macOS arm64 (Apple Silicon)
 echo "构建 macOS arm64..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-darwin-arm64 .
+GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-darwin-arm64 ./cmd/v2ray-manager
 
 # Windows amd64
 echo "构建 Windows amd64..."
-GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-windows-amd64.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-windows-amd64.exe ./cmd/v2ray-manager
 
 # Windows arm64
 echo "构建 Windows arm64..."
-GOOS=windows GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-windows-arm64.exe .
+GOOS=windows GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager-windows-arm64.exe ./cmd/v2ray-manager
 
 # 本地平台构建
 echo "构建本地版本..."
-go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager .
+go build -ldflags="${LDFLAGS}" -o bin/v2ray-subscription-manager ./cmd/v2ray-manager
 
 echo "✅ 构建完成！"
 echo "输出目录: bin/"

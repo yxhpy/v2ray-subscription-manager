@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,8 +81,8 @@ func NewSpeedTestWorkflow(subscriptionURL string) *SpeedTestWorkflow {
 	return &SpeedTestWorkflow{
 		config: WorkflowConfig{
 			SubscriptionURL: subscriptionURL,
-			MaxConcurrency:  50, // 默认50个并发，榨干性能
-			TestTimeout:     15, // 减少到15秒超时
+			MaxConcurrency:  10, // 降低到10个并发，避免资源耗尽
+			TestTimeout:     30, // 增加到30秒超时，适应Windows环境
 			OutputFile:      "speed_test_results.txt",
 			TestURL:         "http://www.baidu.com", // 默认使用百度
 			MaxNodes:        0,                      // 0表示不限制
@@ -541,8 +540,12 @@ func (w *SpeedTestWorkflow) testV2RayNode(node *types.Node, result SpeedTestResu
 		return result
 	}
 
-	// 减少等待时间到1秒，提升效率
-	time.Sleep(1 * time.Second)
+	// Windows环境需要更长的启动时间
+	waitTime := 2 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 5 * time.Second
+	}
+	time.Sleep(waitTime)
 
 	// 测试连接和速度
 	latency, speed, err := w.testProxySpeed(tempManager.HTTPPort)
@@ -593,8 +596,12 @@ func (w *SpeedTestWorkflow) testHysteria2Node(node *types.Node, result SpeedTest
 		return result
 	}
 
-	// 减少等待时间到1.5秒，提升效率
-	time.Sleep(1500 * time.Millisecond)
+	// Windows环境需要更长的启动时间
+	waitTime := 2 * time.Second
+	if runtime.GOOS == "windows" {
+		waitTime = 5 * time.Second
+	}
+	time.Sleep(waitTime)
 
 	// 测试连接和速度
 	latency, speed, err := w.testProxySpeed(tempHysteria2Manager.HTTPPort)
@@ -612,36 +619,92 @@ func (w *SpeedTestWorkflow) testHysteria2Node(node *types.Node, result SpeedTest
 
 // testProxySpeed 测试代理速度
 func (w *SpeedTestWorkflow) testProxySpeed(proxyPort int) (int64, float64, error) {
-	// 创建HTTP客户端
+	// 创建HTTP客户端 - 针对Windows环境优化
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", proxyPort)
+
+	// 创建更健壮的Transport配置
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(proxyURL)),
+		DialContext: (&net.Dialer{
+			Timeout:   time.Duration(w.config.TestTimeout) * time.Second,
+			KeepAlive: 30 * time.Second, // 保持连接活跃
+		}).DialContext,
+		ForceAttemptHTTP2:     false, // 禁用HTTP/2，避免兼容性问题
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second, // TLS握手超时
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false, // 允许Keep-Alive
+		DisableCompression:    false, // 允许压缩
+	}
+
 	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(mustParseURL(proxyURL)),
-			DialContext: (&net.Dialer{
-				Timeout: time.Duration(w.config.TestTimeout) * time.Second,
-			}).DialContext,
+		Transport: transport,
+		Timeout:   time.Duration(w.config.TestTimeout) * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 限制重定向次数，避免无限重定向
+			if len(via) >= 3 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
 		},
-		Timeout: time.Duration(w.config.TestTimeout) * time.Second,
 	}
 
-	// 测试延迟
-	startTime := time.Now()
+	// 测试延迟 - 增加重试机制
+	var resp *http.Response
+	var latency int64
+	var err error
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.config.TestTimeout)*time.Second)
-	defer cancel()
+	// 重试最多3次
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		startTime := time.Now()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", w.config.TestURL, nil)
-	if err != nil {
-		return 0, 0, err
+		// 简化逻辑：去掉重试中的context，使用client自带的超时
+		req, err := http.NewRequest("GET", w.config.TestURL, nil)
+		if err != nil {
+			if attempt == maxRetries {
+				return 0, 0, fmt.Errorf("创建请求失败: %v", err)
+			}
+			time.Sleep(time.Duration(attempt) * time.Second) // 递增等待时间
+			continue
+		}
+
+		// 设置更兼容的User-Agent
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+		req.Header.Set("Accept-Encoding", "gzip, deflate")
+		req.Header.Set("Connection", "keep-alive")
+
+		resp, err = client.Do(req)
+
+		if err != nil {
+			if attempt == maxRetries {
+				// 提供更详细的错误信息
+				if strings.Contains(err.Error(), "unexpected EOF") {
+					return 0, 0, fmt.Errorf("连接意外中断，可能是代理配置问题或网络不稳定")
+				} else if strings.Contains(err.Error(), "timeout") {
+					return 0, 0, fmt.Errorf("连接超时，请检查网络连接或增加超时时间")
+				} else if strings.Contains(err.Error(), "connection refused") {
+					return 0, 0, fmt.Errorf("连接被拒绝，代理服务可能未正常启动")
+				} else if strings.Contains(err.Error(), "context canceled") {
+					return 0, 0, fmt.Errorf("连接被取消，可能是网络超时")
+				}
+				return 0, 0, fmt.Errorf("网络请求失败: %v", err)
+			}
+			time.Sleep(time.Duration(attempt) * time.Second) // 递增等待时间
+			continue
+		}
+
+		latency = time.Since(startTime).Milliseconds()
+		break // 成功，跳出重试循环
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, 0, err
+	if resp == nil {
+		return 0, 0, fmt.Errorf("多次重试后仍然失败")
 	}
 	defer resp.Body.Close()
-
-	latency := time.Since(startTime).Milliseconds()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("HTTP状态码: %d", resp.StatusCode)
@@ -669,6 +732,23 @@ func mustParseURL(urlStr string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// isProxyReady 检查代理是否已就绪
+func (w *SpeedTestWorkflow) isProxyReady(proxyURL string, timeout time.Duration) bool {
+	// 简单检查代理端口是否监听
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return false
+	}
+
+	conn, err := net.DialTimeout("tcp", u.Host, timeout)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	return true
 }
 
 // sortResultsBySpeed 按速度排序结果

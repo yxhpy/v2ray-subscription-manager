@@ -83,7 +83,7 @@ for target in "${targets[@]}"; do
     output="bin/v2ray-subscription-manager-${goos}-${goarch}${ext}"
     
     print_info "编译 ${goos}/${goarch}..."
-    GOOS=$goos GOARCH=$goarch go build -ldflags="-s -w" -o "$output" .
+    GOOS=$goos GOARCH=$goarch go build -ldflags="-s -w" -o "$output" ./cmd/v2ray-manager
     
     if [ -f "$output" ]; then
         size=$(ls -lh "$output" | awk '{print $5}')

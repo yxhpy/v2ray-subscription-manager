@@ -138,17 +138,33 @@ func generateV2RayConfig(node *types.Node, httpPort, socksPort int) (map[string]
 	case "ss":
 		// 检查加密方法兼容性
 		supportedMethods := map[string]string{
-			"aes-256-cfb":             "aes-256-gcm", // 转换为更安全的方法
-			"aes-128-cfb":             "aes-128-gcm",
-			"aes-192-cfb":             "aes-256-gcm",
-			"aes-256-ctr":             "aes-256-gcm",
-			"aes-128-ctr":             "aes-128-gcm",
-			"chacha20":                "chacha20-poly1305",
-			"chacha20-ietf":           "chacha20-poly1305",
-			"aes-256-gcm":             "aes-256-gcm",             // 已支持
-			"aes-128-gcm":             "aes-128-gcm",             // 已支持
-			"chacha20-poly1305":       "chacha20-poly1305",       // 已支持
-			"2022-blake3-aes-256-gcm": "2022-blake3-aes-256-gcm", // 新方法
+			// 传统方法 - 转换为更安全的AEAD方法
+			"aes-256-cfb":   "aes-256-gcm",
+			"aes-128-cfb":   "aes-128-gcm",
+			"aes-192-cfb":   "aes-256-gcm",
+			"aes-256-ctr":   "aes-256-gcm",
+			"aes-128-ctr":   "aes-128-gcm",
+			"chacha20":      "chacha20-poly1305",
+			"chacha20-ietf": "chacha20-poly1305",
+
+			// AEAD方法 - 直接支持
+			"aes-256-gcm":             "aes-256-gcm",
+			"aes-128-gcm":             "aes-128-gcm",
+			"chacha20-poly1305":       "chacha20-poly1305",
+			"chacha20-ietf-poly1305":  "chacha20-poly1305", // 常见的chacha20变体
+			"xchacha20-poly1305":      "chacha20-poly1305", // 扩展版本，映射到标准版本
+			"xchacha20-ietf-poly1305": "chacha20-poly1305", // 扩展版本变体
+
+			// Shadowsocks 2022新方法
+			"2022-blake3-aes-128-gcm":       "2022-blake3-aes-128-gcm",
+			"2022-blake3-aes-256-gcm":       "2022-blake3-aes-256-gcm",
+			"2022-blake3-chacha20-poly1305": "2022-blake3-chacha20-poly1305",
+			"2022-blake3-chacha12-poly1305": "2022-blake3-chacha12-poly1305",
+			"2022-blake3-chacha8-poly1305":  "2022-blake3-chacha8-poly1305",
+
+			// 无加密方法（通常与TLS结合使用）
+			"none":  "none",
+			"plain": "none",
 		}
 
 		method := node.Method
@@ -162,17 +178,32 @@ func generateV2RayConfig(node *types.Node, httpPort, socksPort int) (map[string]
 			method = "aes-256-gcm"
 		}
 
+		// Shadowsocks配置 - 针对Windows环境优化
+		servers := []map[string]interface{}{
+			{
+				"address":  node.Server,
+				"port":     parsePort(node.Port),
+				"method":   method,
+				"password": node.Password,
+			},
+		}
+
 		outbound = map[string]interface{}{
 			"tag":      "proxy",
 			"protocol": "shadowsocks",
 			"settings": map[string]interface{}{
-				"servers": []map[string]interface{}{
-					{
-						"address":  node.Server,
-						"port":     parsePort(node.Port),
-						"method":   method,
-						"password": node.Password,
+				"servers": servers,
+			},
+			"streamSettings": map[string]interface{}{
+				"network": "tcp",
+				"tcpSettings": map[string]interface{}{
+					"header": map[string]interface{}{
+						"type": "none",
 					},
+				},
+				"sockopt": map[string]interface{}{
+					"tcpKeepAliveInterval": 30,   // TCP Keep-Alive间隔
+					"tcpNoDelay":           true, // 禁用Nagle算法，提高响应速度
 				},
 			},
 		}
