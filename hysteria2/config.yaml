@@ -1,17 +1,22 @@
 # Hysteria2 客户端配置
-server: hy2-1.694463.xyz:4489
+server: 77.110.115.25:5053
 
-auth: dongtaiwang.com
+auth: 4c0c889785026935
 
 bandwidth:
   up: 20 mbps
   down: 100 mbps
 
 socks5:
-  listen: 127.0.0.1:1081
+  listen: 127.0.0.1:1083
 
 http:
-  listen: 127.0.0.1:8081
+  listen: 127.0.0.1:8083
 
 tls:
   insecure: true
+
+obfs:
+  type: salamander
+  salamander:
+    password: salamander

@@ -124,6 +124,14 @@ func (w *SpeedTestWorkflow) Run() error {
 	// 设置信号处理，确保程序退出时清理资源
 	w.setupSignalHandler()
 
+	// 步骤0: 检查和安装依赖
+	fmt.Printf("\n🔧 检查和安装必要依赖...\n")
+	err := w.checkAndInstallDependencies()
+	if err != nil {
+		return fmt.Errorf("依赖检查失败: %v", err)
+	}
+	fmt.Printf("✅ 所有依赖已就绪\n")
+
 	// 步骤1: 解析订阅链接
 	fmt.Printf("\n📥 正在解析订阅链接...\n")
 	nodes, err := w.parseSubscription()
@@ -157,6 +165,9 @@ func (w *SpeedTestWorkflow) Run() error {
 	// 最终清理
 	w.cleanupAllResources()
 
+	// 额外的深度清理
+	w.deepCleanup()
+
 	fmt.Printf("\n🎉 工作流执行完成！\n")
 	return nil
 }
@@ -181,6 +192,20 @@ func (w *SpeedTestWorkflow) addActiveManager(manager ProxyManagerInterface) {
 	w.activeManagers = append(w.activeManagers, manager)
 }
 
+// removeActiveManager 从活跃管理器列表中移除
+func (w *SpeedTestWorkflow) removeActiveManager(manager ProxyManagerInterface) {
+	w.managerMutex.Lock()
+	defer w.managerMutex.Unlock()
+
+	for i, m := range w.activeManagers {
+		if m == manager {
+			// 从切片中移除元素
+			w.activeManagers = append(w.activeManagers[:i], w.activeManagers[i+1:]...)
+			break
+		}
+	}
+}
+
 // cleanupAllResources 清理所有资源
 func (w *SpeedTestWorkflow) cleanupAllResources() {
 	fmt.Printf("🧹 清理所有活跃的代理进程...\n")
@@ -196,6 +221,63 @@ func (w *SpeedTestWorkflow) cleanupAllResources() {
 	exec.Command("pkill", "-f", "v2ray").Run()
 	exec.Command("pkill", "-f", "hysteria").Run()
 	fmt.Printf("✅ 资源清理完成\n")
+}
+
+// deepCleanup 深度清理资源
+func (w *SpeedTestWorkflow) deepCleanup() {
+	fmt.Printf("🧹 执行深度资源清理...\n")
+
+	// 清理所有可能的临时配置文件
+	exec.Command("find", ".", "-name", "temp_config_*.json", "-delete").Run()
+	exec.Command("rm", "-f", "hysteria2/config.yaml.tmp*").Run()
+
+	// 强制清理所有可能占用的端口（轻量级检查）
+	for port := 10000; port < 20000; port += 100 {
+		// 只检查主要端口，不执行kill操作避免影响其他进程
+		exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port)).Run()
+	}
+
+	// 最后一次强制清理进程
+	exec.Command("pkill", "-f", "v2ray").Run()
+	exec.Command("pkill", "-f", "hysteria").Run()
+
+	// 等待一下让进程完全退出
+	time.Sleep(2 * time.Second)
+
+	fmt.Printf("✅ 深度清理完成\n")
+}
+
+// checkAndInstallDependencies 检查和安装必要依赖
+func (w *SpeedTestWorkflow) checkAndInstallDependencies() error {
+	fmt.Printf("🔍 检查V2Ray核心...\n")
+
+	// 检查V2Ray
+	downloader := NewV2RayDownloader()
+	if !downloader.CheckV2rayInstalled() {
+		fmt.Printf("❌ V2Ray未安装，正在自动下载安装...\n")
+		if err := AutoDownloadV2Ray(); err != nil {
+			return fmt.Errorf("V2Ray安装失败: %v", err)
+		}
+		fmt.Printf("✅ V2Ray安装成功\n")
+	} else {
+		fmt.Printf("✅ V2Ray已安装\n")
+	}
+
+	fmt.Printf("🔍 检查Hysteria2客户端...\n")
+
+	// 检查Hysteria2
+	hysteria2Downloader := NewHysteria2Downloader()
+	if !hysteria2Downloader.CheckHysteria2Installed() {
+		fmt.Printf("❌ Hysteria2未安装，正在自动下载安装...\n")
+		if err := AutoDownloadHysteria2(); err != nil {
+			return fmt.Errorf("Hysteria2安装失败: %v", err)
+		}
+		fmt.Printf("✅ Hysteria2安装成功\n")
+	} else {
+		fmt.Printf("✅ Hysteria2已安装\n")
+	}
+
+	return nil
 }
 
 // parseSubscription 解析订阅链接
@@ -316,9 +398,17 @@ func (w *SpeedTestWorkflow) testV2RayNode(node *Node, result SpeedTestResult, po
 	wrapper := &ProxyManagerWrapper{tempManager}
 	w.addActiveManager(wrapper)
 
-	// 清理临时文件
+	// 确保资源完全清理
 	defer func() {
+		// 停止代理
+		tempManager.StopProxy()
+		// 从活跃管理器列表中移除
+		w.removeActiveManager(wrapper)
+		// 清理临时配置文件
 		os.Remove(tempManager.ConfigPath)
+		// 强制清理可能的残留进程
+		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempManager.HTTPPort)).Run()
+		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempManager.SOCKSPort)).Run()
 	}()
 
 	// 启动V2Ray代理
@@ -327,11 +417,6 @@ func (w *SpeedTestWorkflow) testV2RayNode(node *Node, result SpeedTestResult, po
 		result.Error = fmt.Sprintf("启动V2Ray代理失败: %v", err)
 		return result
 	}
-
-	// 确保代理停止
-	defer func() {
-		tempManager.StopProxy()
-	}()
 
 	// 减少等待时间到1秒，提升效率
 	time.Sleep(1 * time.Second)
@@ -363,17 +448,25 @@ func (w *SpeedTestWorkflow) testHysteria2Node(node *Node, result SpeedTestResult
 	wrapper := &Hysteria2ProxyManagerWrapper{tempHysteria2Manager}
 	w.addActiveManager(wrapper)
 
+	// 确保资源完全清理
+	defer func() {
+		// 停止Hysteria2代理
+		tempHysteria2Manager.StopHysteria2Proxy()
+		// 从活跃管理器列表中移除
+		w.removeActiveManager(wrapper)
+		// 强制清理可能的残留进程
+		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.HTTPPort)).Run()
+		exec.Command("pkill", "-f", fmt.Sprintf(":%d", tempHysteria2Manager.SOCKSPort)).Run()
+		// 清理可能的临时配置文件
+		exec.Command("rm", "-f", "hysteria2/config.yaml.tmp*").Run()
+	}()
+
 	// 启动Hysteria2代理
 	err := tempHysteria2Manager.StartHysteria2Proxy(node)
 	if err != nil {
 		result.Error = fmt.Sprintf("启动Hysteria2代理失败: %v", err)
 		return result
 	}
-
-	// 确保代理停止
-	defer func() {
-		tempHysteria2Manager.StopHysteria2Proxy()
-	}()
 
 	// 减少等待时间到1.5秒，提升效率
 	time.Sleep(1500 * time.Millisecond)
