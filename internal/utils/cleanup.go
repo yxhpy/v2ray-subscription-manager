@@ -3,7 +3,9 @@ package utils
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // CleanupTempFiles 清理临时文件的通用函数
@@ -33,17 +35,7 @@ func CleanupTempFiles() {
 
 	cleanedCount := 0
 	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range matches {
-			if err := os.Remove(file); err == nil {
-				fmt.Printf("    🗑️  已删除: %s\n", file)
-				cleanedCount++
-			}
-		}
+		cleanedCount += cleanupPattern(pattern)
 	}
 
 	// 清理hysteria2目录下的临时文件
@@ -54,6 +46,52 @@ func CleanupTempFiles() {
 	} else {
 		fmt.Printf("✅ 没有发现需要清理的临时文件\n")
 	}
+}
+
+// cleanupPattern 清理指定模式的文件，支持重试
+func cleanupPattern(pattern string) int {
+	cleanedCount := 0
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return 0
+	}
+
+	for _, file := range matches {
+		if cleanupFileWithRetry(file) {
+			cleanedCount++
+		}
+	}
+
+	return cleanedCount
+}
+
+// cleanupFileWithRetry 删除文件，支持重试机制
+func cleanupFileWithRetry(file string) bool {
+	// 首先检查文件是否存在
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		return false // 文件不存在，无需删除
+	}
+
+	maxRetries := 3
+	retryDelay := 500 * time.Millisecond
+
+	for i := 0; i < maxRetries; i++ {
+		if err := os.Remove(file); err == nil {
+			fmt.Printf("    🗑️  已删除: %s\n", file)
+			return true
+		} else if os.IsNotExist(err) {
+			// 文件在删除过程中被其他进程删除了
+			return false
+		} else if i == maxRetries-1 {
+			fmt.Printf("    ❌ 删除失败: %s - %v\n", file, err)
+			return false
+		} else {
+			fmt.Printf("    🔄 重试删除: %s (第%d次)\n", file, i+1)
+			time.Sleep(retryDelay)
+		}
+	}
+
+	return false
 }
 
 // CleanupHysteria2TempFiles 清理Hysteria2相关的临时文件
@@ -84,8 +122,7 @@ func CleanupHysteria2TempFiles() {
 				continue
 			}
 
-			if err := os.Remove(file); err == nil {
-				fmt.Printf("    🗑️  已删除: %s\n", file)
+			if cleanupFileWithRetry(file) {
 				cleanedCount++
 			}
 		}
@@ -106,8 +143,7 @@ func CleanupAutoProxyFiles() {
 
 	cleanedCount := 0
 	for _, file := range files {
-		if err := os.Remove(file); err == nil {
-			fmt.Printf("    🗑️  已删除: %s\n", file)
+		if cleanupFileWithRetry(file) {
 			cleanedCount++
 		}
 	}
@@ -120,7 +156,91 @@ func CleanupAutoProxyFiles() {
 // ForceCleanupAll 强制清理所有临时文件和状态文件
 func ForceCleanupAll() {
 	fmt.Printf("🧹 执行强制清理...\n")
+
+	// 第一步：终止相关进程
+	KillRelatedProcesses()
+
+	// 第二步：等待进程完全终止
+	time.Sleep(2 * time.Second)
+
+	// 第三步：清理临时文件
 	CleanupTempFiles()
+
+	// 第四步：清理Auto-proxy文件
 	CleanupAutoProxyFiles()
+
+	// 第五步：验证清理结果
+	VerifyCleanup()
+
 	fmt.Printf("✅ 强制清理完成\n")
+}
+
+// KillRelatedProcesses 终止相关进程
+func KillRelatedProcesses() {
+	fmt.Printf("💀 终止相关进程...\n")
+
+	processNames := []string{"v2ray", "xray", "hysteria2", "hysteria"}
+
+	for _, processName := range processNames {
+		// 首先尝试温和终止
+		cmd := exec.Command("pkill", "-TERM", "-f", processName)
+		if err := cmd.Run(); err == nil {
+			fmt.Printf("    📤 发送终止信号给 %s 进程\n", processName)
+		}
+	}
+
+	// 等待一段时间让进程优雅退出
+	time.Sleep(3 * time.Second)
+
+	// 强制终止仍在运行的进程
+	for _, processName := range processNames {
+		cmd := exec.Command("pkill", "-KILL", "-f", processName)
+		if err := cmd.Run(); err == nil {
+			fmt.Printf("    💀 强制终止 %s 进程\n", processName)
+		}
+	}
+}
+
+// VerifyCleanup 验证清理结果
+func VerifyCleanup() {
+	fmt.Printf("🔍 验证清理结果...\n")
+
+	// 检查关键文件是否仍存在
+	criticalFiles := []string{
+		"auto_proxy_best_node.json",
+		"auto_proxy_state.json",
+		"valid_nodes.json",
+		"mvp_best_node.json",
+	}
+
+	remainingFiles := 0
+	for _, file := range criticalFiles {
+		if _, err := os.Stat(file); err == nil {
+			fmt.Printf("    ⚠️ 文件仍存在: %s\n", file)
+			remainingFiles++
+		}
+	}
+
+	// 检查是否有进程仍在运行
+	processNames := []string{"v2ray", "xray", "hysteria2"}
+	runningProcesses := 0
+	for _, processName := range processNames {
+		if isProcessRunning(processName) {
+			fmt.Printf("    ⚠️ 进程仍在运行: %s\n", processName)
+			runningProcesses++
+		}
+	}
+
+	if remainingFiles == 0 && runningProcesses == 0 {
+		fmt.Printf("    ✅ 清理验证通过\n")
+	} else {
+		fmt.Printf("    ⚠️ 发现 %d 个残留文件，%d 个残留进程\n", remainingFiles, runningProcesses)
+	}
+}
+
+// isProcessRunning 检查进程是否仍在运行
+func isProcessRunning(processName string) bool {
+	cmd := exec.Command("pgrep", "-f", processName)
+	output, err := cmd.Output()
+	return err == nil && len(output) > 0
 }

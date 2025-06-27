@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -260,31 +261,170 @@ func (m *AutoProxyManager) Stop() error {
 	m.state.Running = false
 	m.mutex.Unlock()
 
-	// 停止测试进程
+	// 第一步：停止测试进程并等待
 	fmt.Printf("  🛑 停止测试进程...\n")
 	m.testerCancel()
 	if m.tester != nil {
-		m.tester.Stop()
+		if err := m.tester.Stop(); err != nil {
+			fmt.Printf("    ⚠️ 测试进程停止异常: %v\n", err)
+		}
+		// 等待测试进程完全停止
+		m.waitForProcessStop("tester", func() bool {
+			return m.testerCtx.Err() != nil
+		})
 	}
 
-	// 停止代理服务进程
+	// 第二步：停止代理服务进程并等待
 	fmt.Printf("  🛑 停止代理服务进程...\n")
 	m.serverCancel()
 	if m.proxyServer != nil {
-		m.proxyServer.Stop()
+		if err := m.proxyServer.Stop(); err != nil {
+			fmt.Printf("    ⚠️ 代理服务进程停止异常: %v\n", err)
+		}
+		// 等待代理服务进程完全停止
+		m.waitForProcessStop("proxy server", func() bool {
+			return m.serverCtx.Err() != nil
+		})
 	}
 
-	// 停止主进程
+	// 第三步：停止主进程
 	m.cancel()
 
-	// 清理资源
+	// 第四步：等待所有进程完全停止
+	fmt.Printf("  ⏳ 等待所有进程完全停止...\n")
+	m.waitForAllProcessesStop()
+
+	// 第五步：强制终止可能残留的进程
+	fmt.Printf("  💀 强制终止残留进程...\n")
+	m.killRelatedProcesses()
+
+	// 第六步：等待进程终止完成
+	time.Sleep(2 * time.Second)
+
+	// 第七步：清理资源
 	m.cleanup()
 
-	// 保存最终状态
+	// 第八步：验证清理结果
+	m.verifyCleanup()
+
+	// 第九步：保存最终状态
 	m.saveState()
 
-	fmt.Printf("✅ 双进程自动代理系统已停止\n")
+	fmt.Printf("✅ 双进程自动代理系统已完全停止\n")
 	return nil
+}
+
+// waitForProcessStop 等待单个进程停止
+func (m *AutoProxyManager) waitForProcessStop(processName string, checkFunc func() bool) {
+	maxWait := 10 * time.Second
+	interval := 500 * time.Millisecond
+	elapsed := time.Duration(0)
+
+	for elapsed < maxWait {
+		if checkFunc() {
+			fmt.Printf("    ✅ %s 进程已停止\n", processName)
+			return
+		}
+		time.Sleep(interval)
+		elapsed += interval
+	}
+
+	fmt.Printf("    ⚠️ %s 进程停止超时，将强制终止\n", processName)
+}
+
+// waitForAllProcessesStop 等待所有进程停止
+func (m *AutoProxyManager) waitForAllProcessesStop() {
+	maxWait := 15 * time.Second
+	interval := 1 * time.Second
+	elapsed := time.Duration(0)
+
+	for elapsed < maxWait {
+		if m.checkAllProcessesStopped() {
+			fmt.Printf("    ✅ 所有进程已停止\n")
+			return
+		}
+		fmt.Printf("    ⏳ 等待进程停止... (%v/%v)\n", elapsed, maxWait)
+		time.Sleep(interval)
+		elapsed += interval
+	}
+
+	fmt.Printf("    ⚠️ 进程停止超时，将执行强制清理\n")
+}
+
+// checkAllProcessesStopped 检查所有进程是否已停止
+func (m *AutoProxyManager) checkAllProcessesStopped() bool {
+	// 检查context是否已取消
+	if m.ctx.Err() == nil {
+		return false
+	}
+	if m.testerCtx.Err() == nil {
+		return false
+	}
+	if m.serverCtx.Err() == nil {
+		return false
+	}
+
+	// 检查端口是否已释放
+	ports := []int{m.config.HTTPPort, m.config.SOCKSPort}
+	for _, port := range ports {
+		if m.isPortInUse(port) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isPortInUse 检查端口是否仍在使用
+func (m *AutoProxyManager) isPortInUse(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 1*time.Second)
+	if err != nil {
+		return false // 端口未被使用
+	}
+	conn.Close()
+	return true // 端口仍在使用
+}
+
+// verifyCleanup 验证清理结果
+func (m *AutoProxyManager) verifyCleanup() {
+	fmt.Printf("  🔍 验证清理结果...\n")
+
+	// 检查关键文件是否已删除
+	filesToCheck := []string{
+		m.bestNodeFile,
+		m.config.StateFile,
+		m.config.ValidNodesFile,
+	}
+
+	for _, file := range filesToCheck {
+		if file != "" {
+			if _, err := os.Stat(file); err == nil {
+				fmt.Printf("    ⚠️ 文件仍存在: %s，尝试再次删除\n", file)
+				if err := os.Remove(file); err != nil {
+					fmt.Printf("    ❌ 删除失败: %s - %v\n", file, err)
+				} else {
+					fmt.Printf("    ✅ 重试删除成功: %s\n", file)
+				}
+			}
+		}
+	}
+
+	// 检查进程是否仍在运行
+	processNames := []string{"v2ray", "xray", "hysteria2"}
+	for _, processName := range processNames {
+		if m.isProcessRunning(processName) {
+			fmt.Printf("    ⚠️ 进程仍在运行: %s\n", processName)
+		}
+	}
+
+	fmt.Printf("    ✅ 清理验证完成\n")
+}
+
+// isProcessRunning 检查进程是否仍在运行
+func (m *AutoProxyManager) isProcessRunning(processName string) bool {
+	cmd := exec.Command("pgrep", "-f", processName)
+	output, err := cmd.Output()
+	return err == nil && len(output) > 0
 }
 
 // GetStatus 获取系统状态

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -93,28 +93,125 @@ func (ps *ProxyServer) Start() error {
 func (ps *ProxyServer) Stop() error {
 	fmt.Printf("🛑 停止代理服务器...\n")
 
+	// 第一步：取消上下文
 	ps.cancel()
 
-	// 停止文件监控
+	// 第二步：停止文件监控
 	if ps.watcher != nil {
 		fmt.Printf("  🛑 停止文件监控...\n")
-		ps.watcher.Close()
+		if err := ps.watcher.Close(); err != nil {
+			fmt.Printf("    ⚠️ 文件监控停止异常: %v\n", err)
+		}
 	}
 
-	// 停止代理
+	// 第三步：停止代理进程并等待
 	fmt.Printf("  🛑 停止代理进程...\n")
 	ps.stopProxy()
+	ps.waitForProxyStop()
 
-	// 清理临时配置文件
+	// 第四步：等待所有操作完成
+	fmt.Printf("  ⏳ 等待所有操作完成...\n")
+	time.Sleep(3 * time.Second)
+
+	// 第五步：强制终止残留进程
+	fmt.Printf("  💀 强制终止残留进程...\n")
+	ps.killRelatedProcesses()
+
+	// 第六步：等待进程终止完成
+	time.Sleep(2 * time.Second)
+
+	// 第七步：清理临时配置文件
 	fmt.Printf("  🧹 清理临时配置文件...\n")
 	ps.cleanupTempFiles()
 
-	// 杀死相关进程
-	fmt.Printf("  💀 杀死相关进程...\n")
-	ps.killRelatedProcesses()
+	// 第八步：验证清理结果
+	ps.verifyProxyCleanup()
 
 	fmt.Printf("✅ 代理服务器已完全停止\n")
 	return nil
+}
+
+// waitForProxyStop 等待代理停止
+func (ps *ProxyServer) waitForProxyStop() {
+	maxWait := 10 * time.Second
+	interval := 500 * time.Millisecond
+	elapsed := time.Duration(0)
+
+	for elapsed < maxWait {
+		if ps.isProxyStopped() {
+			fmt.Printf("    ✅ 代理进程已停止\n")
+			return
+		}
+		time.Sleep(interval)
+		elapsed += interval
+	}
+
+	fmt.Printf("    ⚠️ 代理进程停止超时\n")
+}
+
+// isProxyStopped 检查代理是否已停止
+func (ps *ProxyServer) isProxyStopped() bool {
+	// 检查V2Ray代理
+	if ps.proxyManager != nil && ps.proxyManager.GetStatus().Running {
+		return false
+	}
+
+	// 检查Hysteria2代理
+	if ps.hysteria2Manager != nil && ps.hysteria2Manager.GetHysteria2Status().Running {
+		return false
+	}
+
+	// 检查端口是否已释放
+	ports := []int{ps.httpPort, ps.socksPort}
+	for _, port := range ports {
+		if ps.isPortInUse(port) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isPortInUse 检查端口是否仍在使用
+func (ps *ProxyServer) isPortInUse(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 1*time.Second)
+	if err != nil {
+		return false // 端口未被使用
+	}
+	conn.Close()
+	return true // 端口仍在使用
+}
+
+// verifyProxyCleanup 验证代理清理结果
+func (ps *ProxyServer) verifyProxyCleanup() {
+	fmt.Printf("  🔍 验证代理清理结果...\n")
+
+	// 检查端口是否已释放
+	ports := []int{ps.httpPort, ps.socksPort}
+	for _, port := range ports {
+		if ps.isPortInUse(port) {
+			fmt.Printf("    ⚠️ 端口仍被占用: %d\n", port)
+			// 尝试强制终止占用端口的进程
+			if pid := ps.getProcessByPort(port); pid > 0 {
+				exec.Command("kill", "-9", fmt.Sprintf("%d", pid)).Run()
+				fmt.Printf("    🔧 强制终止端口 %d 的进程 (PID: %d)\n", port, pid)
+			}
+		}
+	}
+
+	// 检查配置文件是否存在
+	ps.mutex.RLock()
+	currentNode := ps.currentNode
+	ps.mutex.RUnlock()
+
+	if currentNode != nil {
+		fmt.Printf("    🔧 清理当前节点引用\n")
+		ps.mutex.Lock()
+		ps.currentNode = nil
+		ps.mutex.Unlock()
+	}
+
+	fmt.Printf("    ✅ 代理清理验证完成\n")
 }
 
 // loadConfig 加载配置文件
@@ -552,7 +649,7 @@ func (ps *ProxyServer) killRelatedProcesses() {
 	}
 }
 
-// getProcessByPort 获取占用指定端口的进程PID
+// getProcessByPort 获取占用指定端口的进程ID
 func (ps *ProxyServer) getProcessByPort(port int) int {
 	cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
 	output, err := cmd.Output()
@@ -560,15 +657,11 @@ func (ps *ProxyServer) getProcessByPort(port int) int {
 		return 0
 	}
 
-	pidStr := strings.TrimSpace(string(output))
-	if pidStr == "" {
-		return 0
-	}
-
 	var pid int
-	if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid > 0 {
+	if _, err := fmt.Sscanf(string(output), "%d", &pid); err == nil {
 		return pid
 	}
+
 	return 0
 }
 

@@ -131,32 +131,107 @@ func (m *MVPTester) Start() error {
 // Stop 停止MVP测试器
 func (m *MVPTester) Stop() error {
 	fmt.Printf("🛑 停止MVP测试器...\n")
+
+	// 第一步：取消上下文
 	m.cancel()
 
-	// 停止代理
+	// 第二步：停止V2Ray代理并等待
 	if m.proxyManager != nil {
 		fmt.Printf("  🛑 停止V2Ray代理...\n")
-		m.proxyManager.StopProxy()
-	}
-	if m.hysteria2Manager != nil {
-		fmt.Printf("  🛑 停止Hysteria2代理...\n")
-		m.hysteria2Manager.StopHysteria2Proxy()
+		if err := m.proxyManager.StopProxy(); err != nil {
+			fmt.Printf("    ⚠️ V2Ray代理停止异常: %v\n", err)
+		}
+		m.waitForProxyStop("V2Ray", m.proxyManager)
 	}
 
-	// 清理临时配置文件
+	// 第三步：停止Hysteria2代理并等待
+	if m.hysteria2Manager != nil {
+		fmt.Printf("  🛑 停止Hysteria2代理...\n")
+		if err := m.hysteria2Manager.StopHysteria2Proxy(); err != nil {
+			fmt.Printf("    ⚠️ Hysteria2代理停止异常: %v\n", err)
+		}
+		m.waitForHysteria2Stop("Hysteria2", m.hysteria2Manager)
+	}
+
+	// 第四步：等待所有操作完成
+	fmt.Printf("  ⏳ 等待所有操作完成...\n")
+	time.Sleep(3 * time.Second)
+
+	// 第五步：强制终止残留进程
+	fmt.Printf("  💀 强制终止残留进程...\n")
+	m.killRelatedProcesses()
+
+	// 第六步：等待进程终止完成
+	time.Sleep(2 * time.Second)
+
+	// 第七步：清理临时配置文件
 	fmt.Printf("  🧹 清理临时配置文件...\n")
 	m.cleanupTempFiles()
 
-	// 清理状态文件
+	// 第八步：清理状态文件
 	fmt.Printf("  🧹 清理状态文件...\n")
 	m.cleanupStateFile()
 
-	// 杀死相关进程
-	fmt.Printf("  💀 杀死相关进程...\n")
-	m.killRelatedProcesses()
+	// 第九步：验证清理结果
+	m.verifyMVPCleanup()
 
 	fmt.Printf("✅ MVP测试器已完全停止\n")
 	return nil
+}
+
+// waitForProxyStop 等待V2Ray代理停止
+func (m *MVPTester) waitForProxyStop(name string, manager *proxy.ProxyManager) {
+	maxWait := 10 * time.Second
+	interval := 500 * time.Millisecond
+	elapsed := time.Duration(0)
+
+	for elapsed < maxWait {
+		if !manager.GetStatus().Running {
+			fmt.Printf("    ✅ %s代理已停止\n", name)
+			return
+		}
+		time.Sleep(interval)
+		elapsed += interval
+	}
+
+	fmt.Printf("    ⚠️ %s代理停止超时\n", name)
+}
+
+// waitForHysteria2Stop 等待Hysteria2代理停止
+func (m *MVPTester) waitForHysteria2Stop(name string, manager *proxy.Hysteria2ProxyManager) {
+	maxWait := 10 * time.Second
+	interval := 500 * time.Millisecond
+	elapsed := time.Duration(0)
+
+	for elapsed < maxWait {
+		if !manager.GetHysteria2Status().Running {
+			fmt.Printf("    ✅ %s代理已停止\n", name)
+			return
+		}
+		time.Sleep(interval)
+		elapsed += interval
+	}
+
+	fmt.Printf("    ⚠️ %s代理停止超时\n", name)
+}
+
+// verifyMVPCleanup 验证MVP清理结果
+func (m *MVPTester) verifyMVPCleanup() {
+	fmt.Printf("  🔍 验证MVP清理结果...\n")
+
+	// 检查状态文件是否已删除
+	if m.stateFile != "" {
+		if _, err := os.Stat(m.stateFile); err == nil {
+			fmt.Printf("    ⚠️ 状态文件仍存在: %s，尝试再次删除\n", m.stateFile)
+			if err := os.Remove(m.stateFile); err != nil {
+				fmt.Printf("    ❌ 删除失败: %s - %v\n", m.stateFile, err)
+			} else {
+				fmt.Printf("    ✅ 重试删除成功: %s\n", m.stateFile)
+			}
+		}
+	}
+
+	fmt.Printf("    ✅ MVP清理验证完成\n")
 }
 
 // cleanupStateFile 清理状态文件
