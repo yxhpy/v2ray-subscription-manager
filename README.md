@@ -52,6 +52,13 @@ V2Ray 订阅管理器是一个功能强大的代理管理工具，专为现代�
 - ✅ 自动解压和权限设置
 - ✅ 版本检查和更新提示
 
+### 🌐 Web UI 界面
+- ✅ 现代化响应式设计
+- ✅ 直观的图形化管理界面
+- ✅ 实时状态监控和更新
+- ✅ 移动设备友好支持
+- ✅ 无需命令行操作
+
 </td>
 <td width="50%">
 
@@ -83,7 +90,12 @@ V2Ray 订阅管理器是一个功能强大的代理管理工具，专为现代�
 verify_v2ray_ui2/
 ├── 📁 cmd/                         # 程序入口
 │   ├── v2ray-manager/              # 主程序
+│   ├── web-ui/                     # 🌐 Web UI 服务器
 │   └── cleanup.go                  # 清理工具
+├── 📁 web/                         # 🎨 Web UI 资源
+│   └── static/                     # 静态文件
+│       ├── css/                    # 样式文件
+│       └── js/                     # JavaScript 文件
 ├── 📁 internal/                    # 内部核心模块
 │   ├── core/                       # 核心功能
 │   │   ├── downloader/             # 📥 下载器模块
@@ -95,7 +107,8 @@ verify_v2ray_ui2/
 ├── 📁 pkg/types/                   # 📋 公共类型定义
 ├── 📁 configs/                     # ⚙️ 配置文件模板
 ├── 📁 scripts/                     # 📜 构建和发布脚本
-└── 📁 docs/                        # 📚 项目文档
+├── 📁 docs/                        # 📚 项目文档
+└── demo_webui.sh                   # 🚀 Web UI 演示脚本
 ```
 
 ---
@@ -118,10 +131,44 @@ verify_v2ray_ui2/
 
 ## 🚀 快速开始
 
-### 📦 安装方式
+### 🌐 Web UI 界面（推荐）
 
 <details>
-<summary><b>方式一：下载预编译二进制文件（推荐）</b></summary>
+<summary><b>方式一：一键启动 Web UI（最简单）</b></summary>
+
+```bash
+# 克隆仓库
+git clone https://github.com/yxhpy/v2ray-subscription-manager.git
+cd v2ray-subscription-manager
+
+# 一键启动 Web UI
+./demo_webui.sh
+```
+
+然后在浏览器中访问 `http://localhost:8888` 即可使用图形化界面！
+
+</details>
+
+<details>
+<summary><b>方式二：手动构建 Web UI</b></summary>
+
+```bash
+# 构建 Web UI
+./scripts/build_webui.sh
+
+# 启动 Web UI（默认端口 8888）
+./bin/v2ray-webui-<platform>
+
+# 或指定端口
+./bin/v2ray-webui-<platform> 9999
+```
+
+</details>
+
+### 📦 命令行工具
+
+<details>
+<summary><b>方式一：下载预编译二进制文件</b></summary>
 
 从 [Releases](https://github.com/yxhpy/v2ray-subscription-manager/releases) 页面下载适合您系统的版本：
 
@@ -458,6 +505,7 @@ scripts/release.bat v1.3.0 "添加新功能和修复Bug"
 
 | 📖 文档 | 🔗 链接 | 📝 说明 |
 |:-------:|:-------:|:-------|
+| **Web UI 指南** | [WEBUI_GUIDE.md](docs/WEBUI_GUIDE.md) | Web UI 界面使用指南 |
 | **清理指南** | [CLEANUP_GUIDE.md](docs/CLEANUP_GUIDE.md) | 系统清理详细说明 |
 | **双进程指南** | [DUAL_PROXY_GUIDE.md](docs/DUAL_PROXY_GUIDE.md) | 双进程架构使用指南 |
 | **Windows 优化** | [WINDOWS_OPTIMIZATION.md](docs/WINDOWS_OPTIMIZATION.md) | Windows 系统优化建议 |

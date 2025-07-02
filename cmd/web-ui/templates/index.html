@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V2Ray 订阅管理器</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 标题栏 -->
+        <header class="header">
+            <h1>V2Ray 订阅管理器</h1>
+            <div class="version">v1.0</div>
+        </header>
+
+        <!-- 导航栏 -->
+        <nav class="nav">
+            <a href="#" class="nav-item active" data-panel="dashboard">仪表板</a>
+            <a href="#" class="nav-item" data-panel="subscriptions">订阅管理</a>
+            <a href="#" class="nav-item" data-panel="nodes">节点管理</a>
+            <a href="#" class="nav-item" data-panel="proxy">代理控制</a>
+            <a href="#" class="nav-item" data-panel="speedtest">测速工具</a>
+            <a href="#" class="nav-item" data-panel="settings">设置</a>
+        </nav>
+
+        <!-- 通知区域 -->
+        <div id="notifications" class="notifications"></div>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <!-- 仪表板 -->
+            <div id="dashboard" class="panel active">
+                <h2>系统状态</h2>
+                <div class="status-grid">
+                    <div class="status-card">
+                        <h3>V2Ray 代理</h3>
+                        <div class="status-indicator" id="v2rayStatus">已停止</div>
+                    </div>
+                    <div class="status-card">
+                        <h3>Hysteria2 代理</h3>
+                        <div class="status-indicator" id="hysteria2Status">已停止</div>
+                    </div>
+                    <div class="status-card">
+                        <h3>订阅状态</h3>
+                        <div class="status-indicator" id="subscriptionStatus">未知</div>
+                    </div>
+                </div>
+
+                <div class="info-grid">
+                    <div class="info-item">
+                        <label>HTTP 端口:</label>
+                        <span id="httpPort">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>SOCKS 端口:</label>
+                        <span id="socksPort">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>当前节点:</label>
+                        <span id="currentNode">无</span>
+                    </div>
+                </div>
+
+                <div class="proxy-controls">
+                    <button id="refreshStatus" class="btn btn-primary">刷新状态</button>
+                    <button id="testConnection" class="btn btn-info">测试连接</button>
+                </div>
+            </div>
+
+            <!-- 订阅管理 -->
+            <div id="subscriptions" class="panel">
+                <h2>订阅管理</h2>
+                
+                <div class="form-section">
+                    <div class="form-group">
+                        <label for="subscriptionUrl">订阅链接:</label>
+                        <input type="url" id="subscriptionUrl" placeholder="请输入订阅链接">
+                    </div>
+                    <div class="form-group">
+                        <label for="subscriptionName">订阅名称:</label>
+                        <input type="text" id="subscriptionName" placeholder="可选，留空则自动生成">
+                    </div>
+                    <div class="form-buttons">
+                        <button id="addSubscriptionBtn" class="btn btn-primary">添加订阅</button>
+                    </div>
+                </div>
+
+                <div class="subscription-list">
+                    <h3>订阅列表</h3>
+                    <div id="subscriptionItems" class="subscription-items">
+                        <div class="placeholder">暂无订阅，请添加订阅链接</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 节点管理 -->
+            <div id="nodes" class="panel">
+                <h2>节点管理</h2>
+                
+                <div class="nodes-controls">
+                    <button id="selectAllNodes" class="btn btn-secondary">全选</button>
+                    <button id="deselectAllNodes" class="btn btn-secondary">取消全选</button>
+                    <button id="batchTestNodes" class="btn btn-info">批量测试</button>
+                    <button id="deleteSelectedNodes" class="btn btn-danger">删除选中</button>
+                </div>
+
+                <div class="nodes-list">
+                    <div id="nodeItems" class="node-items">
+                        <div class="placeholder">请先添加订阅以获取节点</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 代理控制 -->
+            <div id="proxy" class="panel">
+                <h2>代理控制</h2>
+                
+                <div class="proxy-controls">
+                    <div class="action-group">
+                        <h3>V2Ray</h3>
+                        <button id="startV2ray" class="btn btn-success">启动</button>
+                        <button id="stopV2ray" class="btn btn-danger">停止</button>
+                    </div>
+                    <div class="action-group">
+                        <h3>Hysteria2</h3>
+                        <button id="startHysteria2" class="btn btn-success">启动</button>
+                        <button id="stopHysteria2" class="btn btn-danger">停止</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 测速工具 -->
+            <div id="speedtest" class="panel">
+                <h2>测速工具</h2>
+                
+                <div class="speedtest-controls">
+                    <button id="quickTest" class="btn btn-info">快速测试</button>
+                    <button id="fullTest" class="btn btn-primary">完整测试</button>
+                </div>
+
+                <div class="test-results">
+                    <h3>测试结果</h3>
+                    <div id="testResults" class="placeholder">暂无测试结果</div>
+                </div>
+            </div>
+
+            <!-- 设置 -->
+            <div id="settings" class="panel">
+                <h2>设置</h2>
+                
+                <div class="settings-form">
+                    <div class="form-group">
+                        <label for="httpPortSetting">HTTP 代理端口:</label>
+                        <input type="number" id="httpPortSetting" value="8888" min="1024" max="65535">
+                    </div>
+                    <div class="form-group">
+                        <label for="socksPortSetting">SOCKS 代理端口:</label>
+                        <input type="number" id="socksPortSetting" value="1080" min="1024" max="65535">
+                    </div>
+                    <div class="form-group">
+                        <label for="testUrlSetting">测试 URL:</label>
+                        <input type="text" id="testUrlSetting" value="https://www.google.com">
+                    </div>
+                    <div class="form-buttons">
+                        <button id="saveSettings" class="btn btn-primary">保存设置</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html> 

@@ -50,8 +50,11 @@ const StateFile = "proxy_state.json"
 
 // NewProxyManager 创建新的代理管理器
 func NewProxyManager() *ProxyManager {
+	// 为每个实例生成唯一的配置文件路径，避免并发冲突
+	uniqueConfigPath := fmt.Sprintf("temp_v2ray_config_%d.json", time.Now().UnixNano())
+
 	pm := &ProxyManager{
-		ConfigPath: "temp_v2ray_config.json",
+		ConfigPath: uniqueConfigPath,
 		HTTPPort:   0, // 将自动分配
 		SOCKSPort:  0, // 将自动分配
 	}
@@ -62,8 +65,27 @@ func NewProxyManager() *ProxyManager {
 	return pm
 }
 
+// NewTestProxyManager 创建用于测试的代理管理器（不加载状态）
+func NewTestProxyManager() *ProxyManager {
+	// 为测试实例生成带测试前缀的唯一配置文件路径
+	uniqueConfigPath := fmt.Sprintf("test_v2ray_config_%d_%d.json", time.Now().UnixNano(), os.Getpid())
+
+	pm := &ProxyManager{
+		ConfigPath: uniqueConfigPath,
+		HTTPPort:   0, // 将自动分配
+		SOCKSPort:  0, // 将自动分配
+	}
+
+	// 测试实例不加载状态，保持完全独立
+	return pm
+}
+
 // findAvailablePort 查找可用端口
 func findAvailablePort(startPort int) int {
+	// 添加随机偏移，避免总是从同一个端口开始
+	offset := rand.Intn(100)
+	startPort += offset
+
 	for port := startPort; port < startPort+1000; port++ {
 		conn, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
@@ -71,7 +93,18 @@ func findAvailablePort(startPort int) int {
 			return port
 		}
 	}
-	return startPort + rand.Intn(1000) // 随机端口作为备选
+
+	// 如果在范围内没找到，尝试完全随机的端口
+	for i := 0; i < 100; i++ {
+		randomPort := 8000 + rand.Intn(2000) // 8000-9999范围
+		conn, err := net.Listen("tcp", fmt.Sprintf(":%d", randomPort))
+		if err == nil {
+			conn.Close()
+			return randomPort
+		}
+	}
+
+	return startPort + rand.Intn(1000) // 最后备选
 }
 
 // generateV2RayConfig 生成V2Ray配置
@@ -545,7 +578,7 @@ func (pm *ProxyManager) StartProxy(node *types.Node) error {
 		pm.StopProxy()
 	}
 
-	// 分配端口（如果尚未设置）
+	// 分配端口（只在端口为0时才重新分配）
 	if pm.HTTPPort == 0 {
 		pm.HTTPPort = findAvailablePort(8080)
 	}
@@ -691,6 +724,30 @@ func (pm *ProxyManager) isV2RayRunning() bool {
 	}
 
 	return false
+}
+
+// IsRunning 检查代理是否正在运行（公开方法）
+func (pm *ProxyManager) IsRunning() bool {
+	return pm.isV2RayRunning()
+}
+
+// GetCurrentNode 获取当前连接的节点
+func (pm *ProxyManager) GetCurrentNode() *types.Node {
+	return pm.CurrentNode
+}
+
+// SetFixedPorts 设置固定端口
+func (pm *ProxyManager) SetFixedPorts(httpPort, socksPort int) {
+	pm.HTTPPort = httpPort
+	pm.SOCKSPort = socksPort
+}
+
+// IsPortOccupied 检查指定端口是否被当前代理占用
+func (pm *ProxyManager) IsPortOccupied(port int) bool {
+	if !pm.isV2RayRunning() {
+		return false
+	}
+	return pm.HTTPPort == port || pm.SOCKSPort == port
 }
 
 // checkV2RayInstalled 检查V2Ray是否安装

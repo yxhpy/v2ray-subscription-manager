@@ -34,6 +34,19 @@ func NewHysteria2ProxyManager() *Hysteria2ProxyManager {
 	}
 }
 
+// NewTestHysteria2ProxyManager 创建用于测试的Hysteria2代理管理器
+func NewTestHysteria2ProxyManager() *Hysteria2ProxyManager {
+	downloader := downloader.NewHysteria2Downloader()
+	// 为测试实例生成带测试前缀的唯一配置文件路径
+	downloader.ConfigPath = fmt.Sprintf("./hysteria2/test_config_%d_%d.yaml", time.Now().UnixNano(), os.Getpid())
+
+	return &Hysteria2ProxyManager{
+		downloader: downloader,
+		HTTPPort:   0, // 将自动分配
+		SOCKSPort:  0, // 将自动分配
+	}
+}
+
 // StartHysteria2Proxy 启动Hysteria2代理
 func (h *Hysteria2ProxyManager) StartHysteria2Proxy(node *types.Node) error {
 	if node.Protocol != "hysteria2" {
@@ -202,4 +215,28 @@ func (h *Hysteria2ProxyManager) SetConfigPath(configPath string) {
 	if h.downloader != nil {
 		h.downloader.ConfigPath = configPath
 	}
+}
+
+// GetCurrentNode 获取当前连接的节点
+func (h *Hysteria2ProxyManager) GetCurrentNode() *types.Node {
+	return h.Hysteria2Node
+}
+
+// SetFixedPorts 设置固定端口
+func (h *Hysteria2ProxyManager) SetFixedPorts(httpPort, socksPort int) {
+	h.HTTPPort = httpPort
+	h.SOCKSPort = socksPort
+}
+
+// IsPortOccupied 检查指定端口是否被当前代理占用
+func (h *Hysteria2ProxyManager) IsPortOccupied(port int) bool {
+	if !h.IsHysteria2Running() {
+		return false
+	}
+	return h.HTTPPort == port || h.SOCKSPort == port
+}
+
+// IsRunning 检查代理是否正在运行（公开方法）
+func (h *Hysteria2ProxyManager) IsRunning() bool {
+	return h.IsHysteria2Running()
 }
