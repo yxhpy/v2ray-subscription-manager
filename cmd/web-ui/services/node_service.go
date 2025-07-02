@@ -23,9 +23,9 @@ type NodeServiceImpl struct {
 	subscriptionService SubscriptionService
 	proxyService        ProxyService
 
-	// 真实的代理管理器
-	v2rayManager     *proxy.ProxyManager
-	hysteria2Manager *proxy.Hysteria2ProxyManager
+	// 节点连接管理 - 每个连接独立的代理管理器
+	nodeConnections map[string]*NodeConnection // key: subscriptionID_nodeIndex
+	connectionMutex sync.RWMutex
 
 	// 节点状态管理
 	nodeStates map[string]*models.NodeInfo // key: subscriptionID_nodeIndex
@@ -38,13 +38,22 @@ type NodeServiceImpl struct {
 	portCounter int64
 }
 
+// NodeConnection 节点连接信息
+type NodeConnection struct {
+	V2RayManager     *proxy.ProxyManager
+	Hysteria2Manager *proxy.Hysteria2ProxyManager
+	HTTPPort         int
+	SOCKSPort        int
+	Protocol         string
+	IsActive         bool
+}
+
 // NewNodeService 创建节点服务
 func NewNodeService(subscriptionService SubscriptionService, proxyService ProxyService) NodeService {
 	service := &NodeServiceImpl{
 		subscriptionService: subscriptionService,
 		proxyService:        proxyService,
-		v2rayManager:        proxy.NewProxyManager(),
-		hysteria2Manager:    proxy.NewHysteria2ProxyManager(),
+		nodeConnections:     make(map[string]*NodeConnection),
 		nodeStates:          make(map[string]*models.NodeInfo),
 		portCounter:         9000, // 测试端口从9000开始
 	}
@@ -55,8 +64,13 @@ func NewNodeService(subscriptionService SubscriptionService, proxyService ProxyS
 	return service
 }
 
-// ConnectNode 连接节点
+// ConnectNode 连接节点（并发安全）
 func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, operation string) (*models.ConnectNodeResponse, error) {
+	// 防止快速点击导致的并发问题
+	operationKey := fmt.Sprintf("connect_%s_%d", subscriptionID, nodeIndex)
+
+	fmt.Printf("DEBUG: 开始处理节点连接操作 %s (订阅:%s, 节点:%d, 操作:%s)\n", operationKey, subscriptionID, nodeIndex, operation)
+
 	subscription, err := n.subscriptionService.GetSubscriptionByID(subscriptionID)
 	if err != nil {
 		return nil, err
@@ -75,22 +89,27 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 	// 更新节点状态为连接中
 	n.updateNodeStatus(subscriptionID, nodeIndex, "connecting")
 
+	fmt.Printf("DEBUG: 准备执行连接操作 %s\n", operation)
+
 	switch operation {
 	case "http_random":
 		// 随机HTTP端口连接 - 自动分配可用端口
-		actualHTTPPort, _, err := n.startProxyForNode(nodeInfo.Node, 0, 0) // 传入0表示随机分配
+		fmt.Printf("DEBUG: 开始启动HTTP随机端口代理\n")
+		actualHTTPPort, _, err := n.startProxyForNodeWithConnection(subscriptionID, nodeIndex, nodeInfo.Node, 0, 0) // 传入0表示随机分配
 		if err != nil {
+			fmt.Printf("DEBUG: 启动HTTP代理失败: %v\n", err)
 			n.updateNodeStatus(subscriptionID, nodeIndex, "error")
 			return nil, fmt.Errorf("启动HTTP代理失败: %v", err)
 		}
 		// 只返回HTTP端口
+		fmt.Printf("DEBUG: HTTP代理启动成功，端口: %d\n", actualHTTPPort)
 		response.HTTPPort = actualHTTPPort
 		response.Port = actualHTTPPort
 		n.setNodePorts(subscriptionID, nodeIndex, actualHTTPPort, 0)
 
 	case "socks_random":
 		// 随机SOCKS端口连接 - 自动分配可用端口
-		_, actualSOCKSPort, err := n.startProxyForNode(nodeInfo.Node, 0, 0) // 传入0表示随机分配
+		_, actualSOCKSPort, err := n.startProxyForNodeWithConnection(subscriptionID, nodeIndex, nodeInfo.Node, 0, 0) // 传入0表示随机分配
 		if err != nil {
 			n.updateNodeStatus(subscriptionID, nodeIndex, "error")
 			return nil, fmt.Errorf("启动SOCKS代理失败: %v", err)
@@ -104,16 +123,12 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 		// 固定HTTP端口连接 - 使用系统配置的固定端口
 		fixedHTTPPort := 8090 // 系统配置的固定HTTP端口
 
-		// 检查端口是否被占用，如果被占用则停止之前的代理
+		// 检查端口是否被占用，如果被占用则停止占用该端口的连接
 		if n.isPortOccupied(fixedHTTPPort) {
-			err := n.stopAllProxies()
-			if err != nil {
-				n.updateNodeStatus(subscriptionID, nodeIndex, "error")
-				return nil, fmt.Errorf("停止之前的代理失败: %v", err)
-			}
+			n.stopConnectionsByPort(fixedHTTPPort)
 		}
 
-		actualHTTPPort, _, err := n.startProxyForNode(nodeInfo.Node, fixedHTTPPort, 0)
+		actualHTTPPort, _, err := n.startProxyForNodeWithConnection(subscriptionID, nodeIndex, nodeInfo.Node, fixedHTTPPort, 0)
 		if err != nil {
 			n.updateNodeStatus(subscriptionID, nodeIndex, "error")
 			return nil, fmt.Errorf("启动固定HTTP代理失败: %v", err)
@@ -126,16 +141,12 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 		// 固定SOCKS端口连接 - 使用系统配置的固定端口
 		fixedSOCKSPort := 1088 // 系统配置的固定SOCKS端口
 
-		// 检查端口是否被占用，如果被占用则停止之前的代理
+		// 检查端口是否被占用，如果被占用则停止占用该端口的连接
 		if n.isPortOccupied(fixedSOCKSPort) {
-			err := n.stopAllProxies()
-			if err != nil {
-				n.updateNodeStatus(subscriptionID, nodeIndex, "error")
-				return nil, fmt.Errorf("停止之前的代理失败: %v", err)
-			}
+			n.stopConnectionsByPort(fixedSOCKSPort)
 		}
 
-		_, actualSOCKSPort, err := n.startProxyForNode(nodeInfo.Node, 0, fixedSOCKSPort)
+		_, actualSOCKSPort, err := n.startProxyForNodeWithConnection(subscriptionID, nodeIndex, nodeInfo.Node, 0, fixedSOCKSPort)
 		if err != nil {
 			n.updateNodeStatus(subscriptionID, nodeIndex, "error")
 			return nil, fmt.Errorf("启动固定SOCKS代理失败: %v", err)
@@ -146,11 +157,9 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 
 	case "disable":
 		// 禁用节点（停止代理）
-		err := n.stopProxyForNode(nodeInfo.Node)
-		if err != nil {
-			return nil, fmt.Errorf("停止代理失败: %v", err)
-		}
+		n.removeNodeConnection(subscriptionID, nodeIndex)
 		n.setNodePorts(subscriptionID, nodeIndex, 0, 0)
+		n.updateNodeStatus(subscriptionID, nodeIndex, "idle")
 
 	default:
 		n.updateNodeStatus(subscriptionID, nodeIndex, "error")
@@ -850,60 +859,207 @@ func (n *NodeServiceImpl) BatchTestNodesWithProgressAndContext(ctx context.Conte
 
 // startProxyForNode 为节点启动代理
 func (n *NodeServiceImpl) startProxyForNode(node *types.Node, httpPort, socksPort int) (int, int, error) {
-	// 停止现有代理
-	n.v2rayManager.StopProxy()
-	n.hysteria2Manager.StopHysteria2Proxy()
+	// 为每个连接创建新的代理管理器实例，确保端口独立分配
+	v2rayManager := proxy.NewProxyManager()
+	hysteria2Manager := proxy.NewHysteria2ProxyManager()
+
+	// 设置端口 - 只在指定了固定端口时才设置
+	if httpPort > 0 || socksPort > 0 {
+		v2rayManager.SetFixedPorts(httpPort, socksPort)
+		hysteria2Manager.SetFixedPorts(httpPort, socksPort)
+	}
+	// 如果传入0，让管理器自动分配可用端口
+
+	// 启动代理
+	var err error
+	var actualHTTPPort, actualSOCKSPort int
 
 	if node.Protocol == "hysteria2" {
-		// 为每次连接创建新的代理管理器实例，确保端口独立分配
-		manager := proxy.NewHysteria2ProxyManager()
-
-		// 设置端口 - 只在指定了固定端口时才设置
-		if httpPort > 0 || socksPort > 0 {
-			manager.SetFixedPorts(httpPort, socksPort)
-		}
-		// 如果传入0，让管理器自动分配可用端口
-
 		// 启动Hysteria2代理
-		err := manager.StartHysteria2Proxy(node)
+		err = hysteria2Manager.StartHysteria2Proxy(node)
 		if err != nil {
 			return 0, 0, err
 		}
-
-		// 更新实例引用
-		n.hysteria2Manager = manager
-		status := manager.GetHysteria2Status()
-		return status.HTTPPort, status.SOCKSPort, nil
+		status := hysteria2Manager.GetHysteria2Status()
+		actualHTTPPort = status.HTTPPort
+		actualSOCKSPort = status.SOCKSPort
 	} else {
-		// 为每次连接创建新的代理管理器实例，确保端口独立分配
-		manager := proxy.NewProxyManager()
-
-		// 设置端口 - 只在指定了固定端口时才设置
-		if httpPort > 0 || socksPort > 0 {
-			manager.SetFixedPorts(httpPort, socksPort)
-		}
-		// 如果传入0，让管理器自动分配可用端口
-
 		// 启动V2Ray代理
-		err := manager.StartProxy(node)
+		err = v2rayManager.StartProxy(node)
 		if err != nil {
 			return 0, 0, err
 		}
+		status := v2rayManager.GetStatus()
+		actualHTTPPort = status.HTTPPort
+		actualSOCKSPort = status.SOCKSPort
+	}
 
-		// 更新实例引用
-		n.v2rayManager = manager
-		status := manager.GetStatus()
-		return status.HTTPPort, status.SOCKSPort, nil
+	return actualHTTPPort, actualSOCKSPort, nil
+}
+
+// startProxyForNodeWithConnection 为节点启动代理并管理连接
+func (n *NodeServiceImpl) startProxyForNodeWithConnection(subscriptionID string, nodeIndex int, node *types.Node, httpPort, socksPort int) (int, int, error) {
+	fmt.Printf("DEBUG: 开始为节点启动代理 (协议:%s, HTTP端口:%d, SOCKS端口:%d)\n", node.Protocol, httpPort, socksPort)
+
+	// 停止已存在的连接
+	n.removeNodeConnection(subscriptionID, nodeIndex)
+	fmt.Printf("DEBUG: 已清理旧连接\n")
+
+	// 为每个连接创建新的代理管理器实例
+	fmt.Printf("DEBUG: 创建代理管理器实例\n")
+	v2rayManager := proxy.NewProxyManager()
+	hysteria2Manager := proxy.NewHysteria2ProxyManager()
+
+	// 设置端口 - 只在指定了固定端口时才设置
+	if httpPort > 0 || socksPort > 0 {
+		fmt.Printf("DEBUG: 设置固定端口 HTTP:%d, SOCKS:%d\n", httpPort, socksPort)
+		v2rayManager.SetFixedPorts(httpPort, socksPort)
+		hysteria2Manager.SetFixedPorts(httpPort, socksPort)
+	} else {
+		fmt.Printf("DEBUG: 使用自动端口分配\n")
+	}
+
+	// 启动代理
+	var err error
+	var actualHTTPPort, actualSOCKSPort int
+
+	fmt.Printf("DEBUG: 启动%s代理\n", node.Protocol)
+	if node.Protocol == "hysteria2" {
+		// 启动Hysteria2代理
+		err = hysteria2Manager.StartHysteria2Proxy(node)
+		if err != nil {
+			return 0, 0, err
+		}
+		status := hysteria2Manager.GetHysteria2Status()
+		actualHTTPPort = status.HTTPPort
+		actualSOCKSPort = status.SOCKSPort
+	} else {
+		// 启动V2Ray代理
+		err = v2rayManager.StartProxy(node)
+		if err != nil {
+			return 0, 0, err
+		}
+		status := v2rayManager.GetStatus()
+		actualHTTPPort = status.HTTPPort
+		actualSOCKSPort = status.SOCKSPort
+	}
+
+	// 创建连接记录
+	connection := &NodeConnection{
+		V2RayManager:     v2rayManager,
+		Hysteria2Manager: hysteria2Manager,
+		HTTPPort:         actualHTTPPort,
+		SOCKSPort:        actualSOCKSPort,
+		Protocol:         node.Protocol,
+		IsActive:         true,
+	}
+
+	// 添加到连接管理
+	n.addNodeConnection(subscriptionID, nodeIndex, connection)
+
+	return actualHTTPPort, actualSOCKSPort, nil
+}
+
+// stopConnectionsByPort 停止占用指定端口的连接
+func (n *NodeServiceImpl) stopConnectionsByPort(port int) {
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+
+	var keysToRemove []string
+	for key, connection := range n.nodeConnections {
+		if connection.IsActive && (connection.HTTPPort == port || connection.SOCKSPort == port) {
+			n.stopNodeConnection(connection)
+			keysToRemove = append(keysToRemove, key)
+		}
+	}
+
+	// 移除已停止的连接
+	for _, key := range keysToRemove {
+		delete(n.nodeConnections, key)
+	}
+}
+
+// getNodeConnectionKey 获取节点连接键
+func (n *NodeServiceImpl) getNodeConnectionKey(subscriptionID string, nodeIndex int) string {
+	return fmt.Sprintf("%s_%d", subscriptionID, nodeIndex)
+}
+
+// addNodeConnection 添加节点连接
+func (n *NodeServiceImpl) addNodeConnection(subscriptionID string, nodeIndex int, connection *NodeConnection) {
+	key := n.getNodeConnectionKey(subscriptionID, nodeIndex)
+
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+
+	// 停止已存在的连接
+	if existingConn, exists := n.nodeConnections[key]; exists {
+		n.stopNodeConnection(existingConn)
+	}
+
+	n.nodeConnections[key] = connection
+}
+
+// getNodeConnection 获取节点连接
+func (n *NodeServiceImpl) getNodeConnection(subscriptionID string, nodeIndex int) *NodeConnection {
+	key := n.getNodeConnectionKey(subscriptionID, nodeIndex)
+
+	n.connectionMutex.RLock()
+	defer n.connectionMutex.RUnlock()
+
+	return n.nodeConnections[key]
+}
+
+// removeNodeConnection 移除节点连接
+func (n *NodeServiceImpl) removeNodeConnection(subscriptionID string, nodeIndex int) {
+	key := n.getNodeConnectionKey(subscriptionID, nodeIndex)
+
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+
+	if connection, exists := n.nodeConnections[key]; exists {
+		fmt.Printf("DEBUG: 移除节点连接 %s (端口: HTTP:%d, SOCKS:%d)\n", key, connection.HTTPPort, connection.SOCKSPort)
+		n.stopNodeConnection(connection)
+		delete(n.nodeConnections, key)
+		fmt.Printf("DEBUG: 节点连接 %s 已成功移除\n", key)
+	} else {
+		fmt.Printf("DEBUG: 未找到要移除的节点连接 %s\n", key)
+	}
+}
+
+// stopNodeConnection 停止节点连接
+func (n *NodeServiceImpl) stopNodeConnection(connection *NodeConnection) {
+	if connection == nil {
+		fmt.Printf("DEBUG: 尝试停止空连接\n")
+		return
+	}
+
+	fmt.Printf("DEBUG: 停止节点连接 (协议:%s, HTTP:%d, SOCKS:%d)\n", connection.Protocol, connection.HTTPPort, connection.SOCKSPort)
+	connection.IsActive = false
+
+	var err error
+	if connection.V2RayManager != nil {
+		err = connection.V2RayManager.StopProxy()
+		if err != nil {
+			fmt.Printf("DEBUG: 停止V2Ray代理失败: %v\n", err)
+		} else {
+			fmt.Printf("DEBUG: V2Ray代理已停止\n")
+		}
+	}
+	if connection.Hysteria2Manager != nil {
+		err = connection.Hysteria2Manager.StopHysteria2Proxy()
+		if err != nil {
+			fmt.Printf("DEBUG: 停止Hysteria2代理失败: %v\n", err)
+		} else {
+			fmt.Printf("DEBUG: Hysteria2代理已停止\n")
+		}
 	}
 }
 
 // stopProxyForNode 停止节点代理
 func (n *NodeServiceImpl) stopProxyForNode(node *types.Node) error {
-	if node.Protocol == "hysteria2" {
-		return n.hysteria2Manager.StopHysteria2Proxy()
-	} else {
-		return n.v2rayManager.StopProxy()
-	}
+	// 这个方法现在需要知道具体是哪个节点，暂时保留向后兼容
+	// 在实际使用中应该使用 removeNodeConnection
+	return nil
 }
 
 // testV2RayNode 测试V2Ray节点
@@ -1320,8 +1476,14 @@ func (n *NodeServiceImpl) ensureNodeState(subscriptionID string, nodeIndex int, 
 
 // isPortOccupied 检查端口是否被占用
 func (n *NodeServiceImpl) isPortOccupied(port int) bool {
-	if n.v2rayManager.IsPortOccupied(port) || n.hysteria2Manager.IsPortOccupied(port) {
-		return true
+	n.connectionMutex.RLock()
+	defer n.connectionMutex.RUnlock()
+
+	// 检查所有活跃的连接是否占用了该端口
+	for _, connection := range n.nodeConnections {
+		if connection.IsActive && (connection.HTTPPort == port || connection.SOCKSPort == port) {
+			return true
+		}
 	}
 	return false
 }
@@ -1338,13 +1500,13 @@ func (n *NodeServiceImpl) isPortAvailable(port int) bool {
 
 // stopAllProxies 停止所有代理
 func (n *NodeServiceImpl) stopAllProxies() error {
-	err := n.v2rayManager.StopProxy()
-	if err != nil {
-		return err
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+
+	for key, connection := range n.nodeConnections {
+		n.stopNodeConnection(connection)
+		delete(n.nodeConnections, key)
 	}
-	err = n.hysteria2Manager.StopHysteria2Proxy()
-	if err != nil {
-		return err
-	}
+
 	return nil
 }

@@ -9,12 +9,21 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/yxhpy/v2ray-subscription-manager/internal/platform"
 	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
 )
+
+// 全局互斥锁用于端口分配
+var portAllocationMutex sync.Mutex
+
+// 初始化随机种子
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 // ProxyStatus 代理状态
 type ProxyStatus struct {
@@ -59,8 +68,10 @@ func NewProxyManager() *ProxyManager {
 		SOCKSPort:  0, // 将自动分配
 	}
 
-	// 尝试加载之前的状态
-	pm.loadState()
+	// 注意：不加载状态，确保每个管理器实例都是独立的
+	// 这样每次都会分配新的端口，避免端口冲突
+
+	fmt.Printf("DEBUG: 创建新的代理管理器，配置文件: %s\n", uniqueConfigPath)
 
 	return pm
 }
@@ -80,31 +91,116 @@ func NewTestProxyManager() *ProxyManager {
 	return pm
 }
 
-// findAvailablePort 查找可用端口
+// 全局端口计数器，确保每次分配不同的端口
+var globalPortCounter int64
+
+// 已占用端口记录
+var usedPorts = make(map[int]bool)
+var usedPortsMutex sync.RWMutex
+
+// findAvailablePort 查找可用端口（改进版本，确保端口唯一）
 func findAvailablePort(startPort int) int {
-	// 添加随机偏移，避免总是从同一个端口开始
-	offset := rand.Intn(100)
-	startPort += offset
+	fmt.Printf("DEBUG: 开始查找可用端口，起始端口: %d\n", startPort)
 
-	for port := startPort; port < startPort+1000; port++ {
-		conn, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-		if err == nil {
-			conn.Close()
-			return port
+	portAllocationMutex.Lock()
+	defer portAllocationMutex.Unlock()
+
+	fmt.Printf("DEBUG: 获得端口分配锁\n")
+
+	// 使用全局计数器确保每次分配不同的起始点
+	globalPortCounter++
+
+	// 从多个不同的范围开始搜索，避免集中在一个区域
+	searchRanges := []int{
+		8000 + int(globalPortCounter*37%500), // 8000-8499
+		8500 + int(globalPortCounter*41%500), // 8500-8999
+		9000 + int(globalPortCounter*43%500), // 9000-9499
+		9500 + int(globalPortCounter*47%500), // 9500-9999
+	}
+
+	// 添加随机偏移
+	randomOffset := rand.Intn(50)
+
+	fmt.Printf("DEBUG: 搜索范围起始点: %v, 计数器: %d, 随机偏移: %d\n", searchRanges, globalPortCounter, randomOffset)
+
+	// 在每个范围内搜索可用端口
+	for _, basePort := range searchRanges {
+		for i := 0; i < 50; i++ {
+			candidatePort := basePort + i + randomOffset
+
+			// 确保端口在合理范围内
+			if candidatePort < 8000 {
+				candidatePort = 8000 + (candidatePort % 100)
+			}
+			if candidatePort > 65535 {
+				candidatePort = 8000 + (candidatePort % 2000)
+			}
+
+			// 检查是否已被我们记录为占用
+			usedPortsMutex.RLock()
+			alreadyUsed := usedPorts[candidatePort]
+			usedPortsMutex.RUnlock()
+
+			if alreadyUsed {
+				fmt.Printf("DEBUG: 端口 %d 已被记录为占用，跳过\n", candidatePort)
+				continue
+			}
+
+			// 使用TCP服务器测试端口可用性
+			if isPortAvailable(candidatePort) {
+				// 记录端口为已使用
+				usedPortsMutex.Lock()
+				usedPorts[candidatePort] = true
+				usedPortsMutex.Unlock()
+
+				fmt.Printf("DEBUG: 找到并分配可用端口: %d\n", candidatePort)
+				return candidatePort
+			}
 		}
 	}
 
-	// 如果在范围内没找到，尝试完全随机的端口
-	for i := 0; i < 100; i++ {
-		randomPort := 8000 + rand.Intn(2000) // 8000-9999范围
-		conn, err := net.Listen("tcp", fmt.Sprintf(":%d", randomPort))
-		if err == nil {
-			conn.Close()
-			return randomPort
-		}
+	// 最后备选方案：使用计数器直接生成一个端口
+	fallbackPort := 8000 + int(globalPortCounter%2000)
+	fmt.Printf("DEBUG: 使用fallback端口: %d\n", fallbackPort)
+
+	// 记录fallback端口
+	usedPortsMutex.Lock()
+	usedPorts[fallbackPort] = true
+	usedPortsMutex.Unlock()
+
+	return fallbackPort
+}
+
+// releasePort 释放端口（当连接关闭时调用）
+func releasePort(port int) {
+	usedPortsMutex.Lock()
+	defer usedPortsMutex.Unlock()
+	delete(usedPorts, port)
+	fmt.Printf("DEBUG: 释放端口: %d\n", port)
+}
+
+// isPortAvailable 检查端口是否可用（通过建立TCP服务器测试）
+func isPortAvailable(port int) bool {
+	// 方法1：尝试监听该端口
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		// 监听失败说明端口被占用
+		fmt.Printf("DEBUG: 端口 %d 被占用 (监听失败: %v)\n", port, err)
+		return false
+	}
+	listener.Close()
+
+	// 方法2：尝试连接该端口确认没有服务在运行
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
+	if err == nil {
+		// 如果连接成功，说明端口被占用
+		conn.Close()
+		fmt.Printf("DEBUG: 端口 %d 被占用 (连接成功)\n", port)
+		return false
 	}
 
-	return startPort + rand.Intn(1000) // 最后备选
+	fmt.Printf("DEBUG: 端口 %d 可用\n", port)
+	return true
 }
 
 // generateV2RayConfig 生成V2Ray配置
@@ -655,6 +751,10 @@ func (pm *ProxyManager) StopProxy() error {
 		return fmt.Errorf("没有运行中的代理")
 	}
 
+	// 记录要释放的端口
+	httpPortToRelease := pm.HTTPPort
+	socksPortToRelease := pm.SOCKSPort
+
 	// 发送终止信号
 	if pm.V2RayProcess.Process != nil {
 		err := pm.V2RayProcess.Process.Signal(syscall.SIGTERM)
@@ -668,6 +768,18 @@ func (pm *ProxyManager) StopProxy() error {
 	pm.V2RayProcess.Wait()
 	pm.V2RayProcess = nil
 	pm.CurrentNode = nil
+
+	// 释放端口资源
+	if httpPortToRelease > 0 {
+		releasePort(httpPortToRelease)
+	}
+	if socksPortToRelease > 0 && socksPortToRelease != httpPortToRelease {
+		releasePort(socksPortToRelease)
+	}
+
+	// 重置端口
+	pm.HTTPPort = 0
+	pm.SOCKSPort = 0
 
 	// 清理配置文件
 	if _, err := os.Stat(pm.ConfigPath); err == nil {
