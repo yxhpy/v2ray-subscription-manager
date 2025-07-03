@@ -156,3 +156,36 @@ func (p *ProxyServiceImpl) SetFixedPorts(httpPort, socksPort int) {
 	p.v2rayManager.SetFixedPorts(p.httpPort, p.socksPort)
 	p.hysteria2Manager.SetFixedPorts(p.httpPort, p.socksPort)
 }
+
+// StopAllConnections 停止所有连接
+func (p *ProxyServiceImpl) StopAllConnections() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	
+	var errs []error
+	
+	// 停止V2Ray代理
+	if p.v2rayManager.IsRunning() {
+		if err := p.v2rayManager.StopProxy(); err != nil {
+			errs = append(errs, fmt.Errorf("停止V2Ray代理失败: %v", err))
+		} else {
+			fmt.Printf("🛑 V2Ray代理已停止\n")
+		}
+	}
+	
+	// 停止Hysteria2代理
+	if p.hysteria2Manager.IsRunning() {
+		if err := p.hysteria2Manager.StopProxy(); err != nil {
+			errs = append(errs, fmt.Errorf("停止Hysteria2代理失败: %v", err))
+		} else {
+			fmt.Printf("🛑 Hysteria2代理已停止\n")
+		}
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("停止连接时发生错误: %v", errs)
+	}
+	
+	fmt.Printf("✅ 所有代理连接已停止\n")
+	return nil
+}

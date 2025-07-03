@@ -6,20 +6,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/database"
 	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/models"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/parser"
 )
 
 // SubscriptionServiceImpl 订阅服务实现
 type SubscriptionServiceImpl struct {
-	subscriptions map[string]*models.Subscription
-	mutex         sync.RWMutex
+	subscriptionDB *database.SubscriptionDB
+	nodeDB         *database.NodeDB
+	mutex          sync.RWMutex
 }
 
 // NewSubscriptionService 创建订阅服务
 func NewSubscriptionService() SubscriptionService {
+	db := database.GetDB()
 	return &SubscriptionServiceImpl{
-		subscriptions: make(map[string]*models.Subscription),
+		subscriptionDB: database.NewSubscriptionDB(db),
+		nodeDB:         database.NewNodeDB(db),
 	}
 }
 
@@ -38,7 +42,11 @@ func (s *SubscriptionServiceImpl) AddSubscription(url, name string) (*models.Sub
 
 	// 创建订阅
 	subscription := models.NewSubscription(id, name, url)
-	s.subscriptions[id] = subscription
+	
+	// 保存到数据库
+	if err := s.subscriptionDB.Create(subscription); err != nil {
+		return nil, fmt.Errorf("保存订阅到数据库失败: %v", err)
+	}
 
 	return subscription, nil
 }
@@ -48,9 +56,10 @@ func (s *SubscriptionServiceImpl) GetAllSubscriptions() []*models.Subscription {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	subscriptions := make([]*models.Subscription, 0, len(s.subscriptions))
-	for _, sub := range s.subscriptions {
-		subscriptions = append(subscriptions, sub)
+	subscriptions, err := s.subscriptionDB.GetAll()
+	if err != nil {
+		fmt.Printf("ERROR: 获取订阅列表失败: %v\n", err)
+		return []*models.Subscription{}
 	}
 	return subscriptions
 }
@@ -60,11 +69,7 @@ func (s *SubscriptionServiceImpl) GetSubscriptionByID(id string) (*models.Subscr
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	subscription, exists := s.subscriptions[id]
-	if !exists {
-		return nil, fmt.Errorf("订阅不存在: %s", id)
-	}
-	return subscription, nil
+	return s.subscriptionDB.GetByID(id)
 }
 
 // ParseSubscription 解析订阅
@@ -72,9 +77,10 @@ func (s *SubscriptionServiceImpl) ParseSubscription(id string) (*models.Subscrip
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	subscription, exists := s.subscriptions[id]
-	if !exists {
-		return nil, fmt.Errorf("订阅不存在: %s", id)
+	// 获取订阅
+	subscription, err := s.subscriptionDB.GetByID(id)
+	if err != nil {
+		return nil, err
 	}
 
 	// 获取订阅内容
@@ -95,10 +101,20 @@ func (s *SubscriptionServiceImpl) ParseSubscription(id string) (*models.Subscrip
 		return nil, fmt.Errorf("解析订阅失败: %v", err)
 	}
 
-	// 转换为 NodeInfo 结构
+	// 先清空旧节点
+	// TODO: 实现删除旧节点的逻辑
+
+	// 转换为 NodeInfo 结构并保存到数据库
 	nodeInfos := make([]*models.NodeInfo, 0, len(nodes))
 	for i, node := range nodes {
 		nodeInfo := models.NewNodeInfo(node, i)
+		
+		// 保存节点到数据库
+		if err := s.nodeDB.Create(nodeInfo, subscription.ID); err != nil {
+			fmt.Printf("WARNING: 保存节点失败: %v\n", err)
+			continue
+		}
+		
 		nodeInfos = append(nodeInfos, nodeInfo)
 	}
 
@@ -108,6 +124,11 @@ func (s *SubscriptionServiceImpl) ParseSubscription(id string) (*models.Subscrip
 	subscription.LastUpdate = time.Now().Format("2006-01-02 15:04:05")
 	subscription.Status = "active"
 
+	// 更新数据库中的订阅
+	if err := s.subscriptionDB.Update(subscription); err != nil {
+		return nil, fmt.Errorf("更新订阅失败: %v", err)
+	}
+
 	return subscription, nil
 }
 
@@ -116,13 +137,19 @@ func (s *SubscriptionServiceImpl) DeleteSubscription(id string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	_, exists := s.subscriptions[id]
-	if !exists {
-		return fmt.Errorf("订阅不存在: %s", id)
+	return s.subscriptionDB.Delete(id)
+}
+
+// UpdateSubscription 更新订阅
+func (s *SubscriptionServiceImpl) UpdateSubscription(subscription *models.Subscription) error {
+	if subscription == nil {
+		return fmt.Errorf("订阅对象不能为空")
 	}
 
-	delete(s.subscriptions, id)
-	return nil
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.subscriptionDB.Update(subscription)
 }
 
 // TestSubscription 测试订阅
@@ -154,6 +181,21 @@ func (s *SubscriptionServiceImpl) TestSubscription(id string) ([]*models.NodeTes
 	}
 
 	return results, nil
+}
+
+// Close 关闭服务，释放资源
+func (s *SubscriptionServiceImpl) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	
+	// 关闭数据库连接
+	if s.subscriptionDB != nil {
+		// 注意：这里不能直接关闭数据库，因为数据库是全局共享的
+		// 数据库连接会在全局关闭时统一处理
+		fmt.Printf("💾 订阅服务资源已释放\n")
+	}
+	
+	return nil
 }
 
 // extractNameFromURL 从URL中提取名称

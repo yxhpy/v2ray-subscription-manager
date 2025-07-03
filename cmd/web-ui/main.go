@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
 
+	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/database"
 	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/handlers"
 	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/services"
 )
@@ -26,13 +33,22 @@ type WebUIServer struct {
 	statusHandler       *handlers.StatusHandler
 
 	// 服务器配置
-	port string
+	port       string
+	httpServer *http.Server
 }
 
 // NewWebUIServer 创建Web UI服务器
 func NewWebUIServer(port string) *WebUIServer {
 	server := &WebUIServer{
 		port: port,
+	}
+
+	// 初始化HTTP服务器
+	server.httpServer = &http.Server{
+		Addr:         port,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// 初始化服务层
@@ -58,7 +74,7 @@ func (s *WebUIServer) initServices() {
 func (s *WebUIServer) initHandlers() {
 	s.subscriptionHandler = handlers.NewSubscriptionHandler(s.subscriptionService)
 	s.nodeHandler = handlers.NewNodeHandler(s.nodeService)
-	s.proxyHandler = handlers.NewProxyHandler(s.proxyService)
+	s.proxyHandler = handlers.NewProxyHandler(s.proxyService, s.nodeService)
 	s.statusHandler = handlers.NewStatusHandler(s.systemService)
 }
 
@@ -99,6 +115,7 @@ func (s *WebUIServer) setupRoutes() {
 	http.HandleFunc("/api/nodes/batch-test-sse", s.nodeHandler.BatchTestNodesSSE)
 	http.HandleFunc("/api/nodes/batch-test", s.nodeHandler.BatchTestNodes)
 	http.HandleFunc("/api/nodes/cancel-batch-test", s.nodeHandler.CancelBatchTest)
+	http.HandleFunc("/api/nodes/delete", s.nodeHandler.DeleteNodes)
 	http.HandleFunc("/api/nodes/connect", s.nodeHandler.ConnectNode)
 	http.HandleFunc("/api/nodes/test", s.nodeHandler.TestNode)
 	http.HandleFunc("/api/nodes/speedtest", s.nodeHandler.SpeedTestNode)
@@ -106,6 +123,8 @@ func (s *WebUIServer) setupRoutes() {
 	// 代理管理API
 	http.HandleFunc("/api/proxy/status", s.proxyHandler.GetProxyStatus)
 	http.HandleFunc("/api/proxy/stop", s.proxyHandler.StopProxy)
+	http.HandleFunc("/api/proxy/connections", s.proxyHandler.GetActiveConnections)
+	http.HandleFunc("/api/proxy/stop-all", s.proxyHandler.StopAllConnections)
 
 	// 主页 - 最后注册catch-all路由
 	http.HandleFunc("/", s.statusHandler.RenderIndex)
@@ -151,7 +170,216 @@ func (s *WebUIServer) Start() error {
 	fmt.Printf("📝 管理界面: http://localhost%s\n", s.port)
 	fmt.Printf("🔗 API文档: http://localhost%s/api/status\n", s.port)
 
-	return http.ListenAndServe(s.port, nil)
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown 优雅关闭服务器
+func (s *WebUIServer) Shutdown(ctx context.Context) error {
+	fmt.Printf("🛑 正在优雅关闭Web UI服务器...\n")
+	
+	// 关闭HTTP服务器
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		fmt.Printf("❌ HTTP服务器关闭失败: %v\n", err)
+		return err
+	}
+	
+	// 清理服务层资源
+	s.cleanup()
+	
+	fmt.Printf("✅ Web UI服务器已优雅关闭\n")
+	return nil
+}
+
+// cleanup 清理所有资源
+func (s *WebUIServer) cleanup() {
+	fmt.Printf("🧹 正在清理系统资源...\n")
+	
+	// 停止所有活跃的代理连接
+	if s.proxyService != nil {
+		fmt.Printf("🔌 停止所有代理连接...\n")
+		s.proxyService.StopAllConnections()
+	}
+	
+	// 停止所有节点连接
+	if s.nodeService != nil {
+		fmt.Printf("🔌 停止所有节点连接...\n")
+		s.nodeService.StopAllNodeConnections()
+	}
+	
+	// 关闭服务层资源
+	if s.subscriptionService != nil {
+		s.subscriptionService.Close()
+	}
+	
+	// 关闭全局数据库连接
+	database.CloseGlobalDB()
+	
+	// 清理临时文件
+	fmt.Printf("🗑️ 清理临时文件...\n")
+	s.cleanupTempFiles()
+	
+	fmt.Printf("✅ 资源清理完成\n")
+}
+
+// cleanupTempFiles 清理临时文件
+func (s *WebUIServer) cleanupTempFiles() {
+	fmt.Printf("🗑️ 开始清理临时文件...\n")
+	
+	// 清理V2Ray临时配置文件
+	tempFiles := []string{
+		"temp_v2ray_config_*.json",
+		"test_v2ray_config_*.json", 
+		"temp_*.yaml",
+		"test_config_*.yaml",
+		"temp_*.json",
+		"test_*.json",
+		"*.tmp",
+		"*.temp",
+		"auto_proxy_*.json",
+		"proxy_state.json",
+		"valid_nodes.json",
+		"mvp_best_node.json",
+	}
+	
+	totalCleaned := 0
+	for _, pattern := range tempFiles {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			fmt.Printf("⚠️ 匹配模式失败 %s: %v\n", pattern, err)
+			continue
+		}
+		
+		for _, file := range matches {
+			// 跳过测试脚本和正常文件
+			if strings.Contains(file, "test_all_features.sh") || 
+			   strings.Contains(file, "test_batch_cancel") ||
+			   strings.Contains(file, "test_frontend.html") {
+				continue
+			}
+			
+			if err := os.Remove(file); err == nil {
+				fmt.Printf("🗑️ 已删除临时文件: %s\n", file)
+				totalCleaned++
+			} else {
+				fmt.Printf("⚠️ 删除文件失败 %s: %v\n", file, err)
+			}
+		}
+	}
+	
+	fmt.Printf("✅ 临时文件清理完成，共清理 %d 个文件\n", totalCleaned)
+}
+
+// setupSignalHandler 设置信号处理器
+func (s *WebUIServer) setupSignalHandler() {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	
+	go func() {
+		sig := <-signalChan
+		fmt.Printf("\n🛑 接收到退出信号: %v\n", sig)
+		fmt.Printf("🔄 开始优雅关闭流程...\n")
+		
+		// 立即执行资源清理
+		fmt.Printf("🧹 执行资源清理...\n")
+		s.cleanup()
+		
+		// 创建超时上下文，给服务器5秒时间优雅关闭
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		
+		// 优雅关闭HTTP服务器
+		if s.httpServer != nil {
+			fmt.Printf("🛑 关闭HTTP服务器...\n")
+			if err := s.httpServer.Shutdown(ctx); err != nil {
+				fmt.Printf("❌ HTTP服务器关闭失败: %v\n", err)
+			} else {
+				fmt.Printf("✅ HTTP服务器已关闭\n")
+			}
+		}
+		
+		fmt.Printf("👋 程序已安全退出\n")
+		os.Exit(0)
+	}()
+}
+
+// validateAndCleanupOnStartup 启动时验证和清理状态
+func (s *WebUIServer) validateAndCleanupOnStartup() {
+	fmt.Printf("🔍 正在验证系统状态...\n")
+	
+	// 检查实际进程状态
+	v2rayRunning := s.checkV2RayProcess()
+	hysteria2Running := s.checkHysteria2Process()
+	
+	fmt.Printf("📊 实际进程状态: V2Ray=%v, Hysteria2=%v\n", v2rayRunning, hysteria2Running)
+	
+	// 重置代理服务状态
+	if s.proxyService != nil {
+		fmt.Printf("🔧 重置代理服务状态...\n")
+		s.proxyService.StopAllConnections()
+	}
+	
+	// 清理数据库中的运行状态
+	s.cleanupDatabaseStatus()
+	
+	fmt.Printf("✅ 系统状态验证完成\n")
+}
+
+// checkV2RayProcess 检查V2Ray进程是否真实运行
+func (s *WebUIServer) checkV2RayProcess() bool {
+	// TODO: 实现进程检查逻辑
+	// 这里可以通过检查进程名、PID文件或端口占用来判断
+	return false
+}
+
+// checkHysteria2Process 检查Hysteria2进程是否真实运行
+func (s *WebUIServer) checkHysteria2Process() bool {
+	// TODO: 实现进程检查逻辑
+	return false
+}
+
+// cleanupDatabaseStatus 清理数据库中的运行状态
+func (s *WebUIServer) cleanupDatabaseStatus() {
+	fmt.Printf("🗄️ 正在清理数据库状态...\n")
+	
+	// 获取数据库实例
+	db := database.GetDB()
+	if db == nil {
+		fmt.Printf("⚠️ 无法获取数据库实例\n")
+		return
+	}
+	
+	// 重置所有节点的运行状态
+	resetNodesSQL := `
+	UPDATE nodes 
+	SET is_running = FALSE, 
+	    status = 'idle',
+	    http_port = 0,
+	    socks_port = 0,
+	    connect_time = '',
+	    updated_at = CURRENT_TIMESTAMP
+	WHERE is_running = TRUE;`
+	
+	if _, err := db.DB.Exec(resetNodesSQL); err != nil {
+		fmt.Printf("❌ 重置节点状态失败: %v\n", err)
+	} else {
+		fmt.Printf("✅ 节点运行状态已重置\n")
+	}
+	
+	// 重置代理状态
+	resetProxySQL := `
+	UPDATE proxy_status 
+	SET v2ray_running = FALSE,
+	    hysteria2_running = FALSE,
+	    current_node_id = NULL,
+	    total_connections = 0,
+	    updated_at = CURRENT_TIMESTAMP
+	WHERE id = 1;`
+	
+	if _, err := db.DB.Exec(resetProxySQL); err != nil {
+		fmt.Printf("❌ 重置代理状态失败: %v\n", err)
+	} else {
+		fmt.Printf("✅ 代理运行状态已重置\n")
+	}
 }
 
 func main() {
@@ -165,9 +393,34 @@ func main() {
 	fmt.Printf("🌟 V2Ray 订阅管理器 Web UI\n")
 	fmt.Printf("🔧 版本: v1.0.0\n")
 
-	// 创建并启动服务器
+	// 创建服务器实例
 	server := NewWebUIServer(":8888")
+	
+	// 设置信号处理器（必须在启动服务器之前）
+	server.setupSignalHandler()
+	
+	// 启动时验证和清理状态
+	server.validateAndCleanupOnStartup()
+	
+	// 设置defer确保资源清理
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("🚨 程序异常退出: %v\n", r)
+			fmt.Printf("🧹 执行紧急资源清理...\n")
+			server.cleanup()
+		}
+	}()
+
+	// 启动服务器
+	fmt.Printf("🔄 启动服务器中...\n")
 	if err := server.Start(); err != nil {
-		log.Fatalf("启动Web UI服务器失败: %v", err)
+		if err == http.ErrServerClosed {
+			fmt.Printf("✅ 服务器已正常关闭\n")
+		} else {
+			fmt.Printf("❌ 启动Web UI服务器失败: %v\n", err)
+			// 确保在异常退出时也执行清理
+			server.cleanup()
+			os.Exit(1)
+		}
 	}
 }

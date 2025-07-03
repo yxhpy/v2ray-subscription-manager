@@ -22,8 +22,12 @@ type SubscriptionService interface {
 	ParseSubscription(id string) (*models.Subscription, error)
 	// 删除订阅
 	DeleteSubscription(id string) error
+	// 更新订阅
+	UpdateSubscription(subscription *models.Subscription) error
 	// 测试订阅
 	TestSubscription(id string) ([]*models.NodeTestResult, error)
+	// 关闭服务，释放资源
+	Close() error
 }
 
 // NodeService 节点服务接口
@@ -40,6 +44,10 @@ type NodeService interface {
 	BatchTestNodesWithProgress(subscriptionID string, nodeIndexes []int, callback ProgressCallback) ([]*models.NodeTestResult, error)
 	// 带进度回调和上下文的批量测试节点
 	BatchTestNodesWithProgressAndContext(ctx context.Context, subscriptionID string, nodeIndexes []int, callback ProgressCallback) ([]*models.NodeTestResult, error)
+	// 删除节点
+	DeleteNodes(subscriptionID string, nodeIndexes []int) error
+	// 停止所有节点连接
+	StopAllNodeConnections() error
 }
 
 // ProxyService 代理服务接口
@@ -58,6 +66,8 @@ type ProxyService interface {
 	StopHysteria2Proxy() error
 	// 设置固定端口
 	SetFixedPorts(httpPort, socksPort int)
+	// 停止所有连接
+	StopAllConnections() error
 }
 
 // SystemService 系统服务接口

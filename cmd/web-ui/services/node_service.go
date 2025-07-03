@@ -8,10 +8,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/database"
 	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/models"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/proxy"
 	"github.com/yxhpy/v2ray-subscription-manager/internal/core/workflow"
@@ -22,6 +25,10 @@ import (
 type NodeServiceImpl struct {
 	subscriptionService SubscriptionService
 	proxyService        ProxyService
+
+	// 数据库操作
+	nodeDB         *database.NodeDB
+	testResultDB   *database.TestResultDB
 
 	// 节点连接管理 - 每个连接独立的代理管理器
 	nodeConnections map[string]*NodeConnection // key: subscriptionID_nodeIndex
@@ -50,9 +57,12 @@ type NodeConnection struct {
 
 // NewNodeService 创建节点服务
 func NewNodeService(subscriptionService SubscriptionService, proxyService ProxyService) NodeService {
+	db := database.GetDB()
 	service := &NodeServiceImpl{
 		subscriptionService: subscriptionService,
 		proxyService:        proxyService,
+		nodeDB:              database.NewNodeDB(db),
+		testResultDB:        database.NewTestResultDB(db),
 		nodeConnections:     make(map[string]*NodeConnection),
 		nodeStates:          make(map[string]*models.NodeInfo),
 		portCounter:         9000, // 测试端口从9000开始
@@ -225,6 +235,13 @@ func (n *NodeServiceImpl) TestNode(subscriptionID string, nodeIndex int) (*model
 	// 保存测试结果到节点状态和订阅数据
 	n.setNodeTestResult(subscriptionID, nodeIndex, result)
 
+	// 保存到数据库
+	if nodeID, err := n.nodeDB.GetNodeIDBySubscriptionAndIndex(subscriptionID, nodeIndex); err == nil {
+		if err := n.testResultDB.Create(nodeID, result); err != nil {
+			fmt.Printf("WARNING: 保存测试结果到数据库失败: %v\n", err)
+		}
+	}
+
 	return result, nil
 }
 
@@ -283,6 +300,13 @@ func (n *NodeServiceImpl) SpeedTestNode(subscriptionID string, nodeIndex int) (*
 
 	// 保存速度测试结果到节点状态和订阅数据
 	n.setNodeSpeedResult(subscriptionID, nodeIndex, result)
+
+	// 保存到数据库
+	if nodeID, err := n.nodeDB.GetNodeIDBySubscriptionAndIndex(subscriptionID, nodeIndex); err == nil {
+		if err := n.testResultDB.CreateSpeedResult(nodeID, result); err != nil {
+			fmt.Printf("WARNING: 保存速度测试结果到数据库失败: %v\n", err)
+		}
+	}
 
 	return result, nil
 }
@@ -957,6 +981,10 @@ func (n *NodeServiceImpl) startProxyForNodeWithConnection(subscriptionID string,
 	// 添加到连接管理
 	n.addNodeConnection(subscriptionID, nodeIndex, connection)
 
+	// 更新节点状态为已连接，并保存端口信息到数据库
+	n.setNodePorts(subscriptionID, nodeIndex, actualHTTPPort, actualSOCKSPort)
+	n.updateNodeStatus(subscriptionID, nodeIndex, "connected")
+
 	return actualHTTPPort, actualSOCKSPort, nil
 }
 
@@ -1402,6 +1430,11 @@ func (n *NodeServiceImpl) updateNodeStatus(subscriptionID string, nodeIndex int,
 	subscription, err := n.subscriptionService.GetSubscriptionByID(subscriptionID)
 	if err == nil && nodeIndex < len(subscription.Nodes) {
 		subscription.Nodes[nodeIndex].UpdateStatus(status)
+		
+		// 更新数据库中的节点状态
+		if err := n.nodeDB.Update(subscription.Nodes[nodeIndex], subscriptionID); err != nil {
+			fmt.Printf("WARNING: 更新节点状态到数据库失败: %v\n", err)
+		}
 	}
 }
 
@@ -1421,6 +1454,11 @@ func (n *NodeServiceImpl) setNodePorts(subscriptionID string, nodeIndex int, htt
 	subscription, err := n.subscriptionService.GetSubscriptionByID(subscriptionID)
 	if err == nil && nodeIndex < len(subscription.Nodes) {
 		subscription.Nodes[nodeIndex].SetPorts(httpPort, socksPort)
+		
+		// 更新数据库中的节点状态
+		if err := n.nodeDB.Update(subscription.Nodes[nodeIndex], subscriptionID); err != nil {
+			fmt.Printf("WARNING: 更新节点端口到数据库失败: %v\n", err)
+		}
 	}
 }
 
@@ -1498,6 +1536,95 @@ func (n *NodeServiceImpl) isPortAvailable(port int) bool {
 	return true
 }
 
+// DeleteNodes 删除节点
+func (n *NodeServiceImpl) DeleteNodes(subscriptionID string, nodeIndexes []int) error {
+	if subscriptionID == "" {
+		return fmt.Errorf("订阅ID不能为空")
+	}
+
+	if len(nodeIndexes) == 0 {
+		return fmt.Errorf("节点索引列表不能为空")
+	}
+
+	fmt.Printf("DEBUG: 删除节点请求 - subscription_id: %s, node_indexes: %v\n", subscriptionID, nodeIndexes)
+
+	// 获取订阅
+	subscription, err := n.subscriptionService.GetSubscriptionByID(subscriptionID)
+	if err != nil {
+		return fmt.Errorf("获取订阅失败: %v", err)
+	}
+
+	if subscription.Nodes == nil || len(subscription.Nodes) == 0 {
+		return fmt.Errorf("订阅中没有节点")
+	}
+
+	// 验证所有节点索引的有效性
+	for _, nodeIndex := range nodeIndexes {
+		if nodeIndex < 0 || nodeIndex >= len(subscription.Nodes) {
+			return fmt.Errorf("节点索引 %d 无效", nodeIndex)
+		}
+	}
+
+	// 停止要删除节点的连接
+	for _, nodeIndex := range nodeIndexes {
+		// 移除节点连接
+		n.removeNodeConnection(subscriptionID, nodeIndex)
+		
+		// 清理节点状态
+		key := fmt.Sprintf("%s_%d", subscriptionID, nodeIndex)
+		n.stateMutex.Lock()
+		delete(n.nodeStates, key)
+		n.stateMutex.Unlock()
+		
+		fmt.Printf("DEBUG: 已清理节点 %d 的连接和状态\n", nodeIndex)
+	}
+
+	// 从数据库删除节点
+	err = n.nodeDB.DeleteByIndexes(subscriptionID, nodeIndexes)
+	if err != nil {
+		return fmt.Errorf("从数据库删除节点失败: %v", err)
+	}
+
+	// 重新索引剩余节点
+	err = n.nodeDB.ReindexNodes(subscriptionID)
+	if err != nil {
+		return fmt.Errorf("重新索引节点失败: %v", err)
+	}
+
+	// 从订阅对象中删除节点（从大到小排序，避免索引变化影响）
+	sortedIndexes := make([]int, len(nodeIndexes))
+	copy(sortedIndexes, nodeIndexes)
+	
+	// 简单的冒泡排序（从大到小）
+	for i := 0; i < len(sortedIndexes)-1; i++ {
+		for j := 0; j < len(sortedIndexes)-1-i; j++ {
+			if sortedIndexes[j] < sortedIndexes[j+1] {
+				sortedIndexes[j], sortedIndexes[j+1] = sortedIndexes[j+1], sortedIndexes[j]
+			}
+		}
+	}
+
+	// 从大到小删除节点，避免索引偏移
+	for _, nodeIndex := range sortedIndexes {
+		if nodeIndex < len(subscription.Nodes) {
+			subscription.Nodes = append(subscription.Nodes[:nodeIndex], subscription.Nodes[nodeIndex+1:]...)
+			fmt.Printf("DEBUG: 已从订阅中删除节点索引 %d\n", nodeIndex)
+		}
+	}
+
+	// 更新节点计数
+	subscription.NodeCount = len(subscription.Nodes)
+	
+	// 更新订阅（通过subscription service保存）
+	err = n.subscriptionService.UpdateSubscription(subscription)
+	if err != nil {
+		return fmt.Errorf("更新订阅失败: %v", err)
+	}
+
+	fmt.Printf("DEBUG: 成功删除 %d 个节点\n", len(nodeIndexes))
+	return nil
+}
+
 // stopAllProxies 停止所有代理
 func (n *NodeServiceImpl) stopAllProxies() error {
 	n.connectionMutex.Lock()
@@ -1508,5 +1635,106 @@ func (n *NodeServiceImpl) stopAllProxies() error {
 		delete(n.nodeConnections, key)
 	}
 
+	return nil
+}
+
+// GetActiveConnections 获取所有活跃的代理连接
+func (n *NodeServiceImpl) GetActiveConnections() []*models.ActiveConnection {
+	n.connectionMutex.RLock()
+	defer n.connectionMutex.RUnlock()
+
+	var connections []*models.ActiveConnection
+	for key, connection := range n.nodeConnections {
+		if connection.IsActive {
+			// 解析订阅ID和节点索引
+			parts := strings.Split(key, "_")
+			if len(parts) >= 2 {
+				subscriptionID := strings.Join(parts[:len(parts)-1], "_")
+				nodeIndex := parts[len(parts)-1]
+				
+				// 获取节点信息
+				if subscription, err := n.subscriptionService.GetSubscriptionByID(subscriptionID); err == nil {
+					if idx, err := strconv.Atoi(nodeIndex); err == nil && idx >= 0 && idx < len(subscription.Nodes) {
+						nodeInfo := subscription.Nodes[idx]
+						
+						activeConn := &models.ActiveConnection{
+							SubscriptionID:   subscriptionID,
+							SubscriptionName: subscription.Name,
+							NodeIndex:        idx,
+							NodeName:         nodeInfo.Name,
+							Protocol:         connection.Protocol,
+							HTTPPort:         connection.HTTPPort,
+							SOCKSPort:        connection.SOCKSPort,
+							Server:           nodeInfo.Server,
+							ConnectTime:      nodeInfo.ConnectTime,
+							IsActive:         connection.IsActive,
+						}
+						connections = append(connections, activeConn)
+					}
+				}
+			}
+		}
+	}
+
+	return connections
+}
+
+// StopAllActiveConnections 停止所有活跃连接
+func (n *NodeServiceImpl) StopAllActiveConnections() error {
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+
+	var keys []string
+	for key, connection := range n.nodeConnections {
+		if connection.IsActive {
+			n.stopNodeConnection(connection)
+			keys = append(keys, key)
+		}
+	}
+
+	// 清理连接记录
+	for _, key := range keys {
+		delete(n.nodeConnections, key)
+		
+		// 更新节点状态
+		parts := strings.Split(key, "_")
+		if len(parts) >= 2 {
+			subscriptionID := strings.Join(parts[:len(parts)-1], "_")
+			if nodeIndex, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+				n.setNodePorts(subscriptionID, nodeIndex, 0, 0)
+				n.updateNodeStatus(subscriptionID, nodeIndex, "idle")
+			}
+		}
+	}
+
+	return nil
+}
+
+// StopAllNodeConnections 停止所有节点连接
+func (n *NodeServiceImpl) StopAllNodeConnections() error {
+	n.connectionMutex.Lock()
+	defer n.connectionMutex.Unlock()
+	
+	fmt.Printf("🛑 正在停止所有节点连接...\n")
+	var errors []error
+	stoppedCount := 0
+	
+	for key, connection := range n.nodeConnections {
+		fmt.Printf("🔌 停止连接: %s (协议:%s, HTTP:%d, SOCKS:%d)\n", 
+			key, connection.Protocol, connection.HTTPPort, connection.SOCKSPort)
+		
+		n.stopNodeConnection(connection)
+		stoppedCount++
+	}
+	
+	// 清空所有连接
+	n.nodeConnections = make(map[string]*NodeConnection)
+	
+	fmt.Printf("✅ 已停止 %d 个节点连接\n", stoppedCount)
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("停止部分连接时发生错误: %v", errors)
+	}
+	
 	return nil
 }

@@ -10,8 +10,14 @@
     <div class="container">
         <!-- 标题栏 -->
         <header class="header">
-            <h1>V2Ray 订阅管理器</h1>
-            <div class="version">v1.0</div>
+            <div class="header-left">
+                <h1>🚀 V2Ray 订阅管理器</h1>
+                <p class="header-subtitle">智能代理节点管理平台</p>
+            </div>
+            <div class="header-right">
+                <div class="version">v2.1.0</div>
+                <div class="status-indicator-mini" id="globalStatus">在线</div>
+            </div>
         </header>
 
         <!-- 导航栏 -->
@@ -31,46 +37,73 @@
         <main class="main">
             <!-- 仪表板 -->
             <div id="dashboard" class="panel active">
-                <h2>系统状态</h2>
+                <h2>📊 系统概览</h2>
+                
+                <!-- 核心状态卡片 -->
                 <div class="status-grid">
-                    <div class="status-card">
-                        <h3>V2Ray 代理</h3>
-                        <div class="status-indicator" id="v2rayStatus">已停止</div>
+                    <div class="status-card hover-lift">
+                        <div class="status-icon">🔗</div>
+                        <h3>活跃连接</h3>
+                        <div class="status-indicator" id="dashboardActiveConnections">0 个</div>
+                        <div class="status-details">当前运行的代理连接</div>
                     </div>
-                    <div class="status-card">
-                        <h3>Hysteria2 代理</h3>
-                        <div class="status-indicator" id="hysteria2Status">已停止</div>
+                    <div class="status-card hover-lift">
+                        <div class="status-icon">📋</div>
+                        <h3>订阅管理</h3>
+                        <div class="status-indicator" id="dashboardSubscriptions">0 个</div>
+                        <div class="status-details">已配置的订阅源</div>
                     </div>
-                    <div class="status-card">
-                        <h3>订阅状态</h3>
-                        <div class="status-indicator" id="subscriptionStatus">未知</div>
+                    <div class="status-card hover-lift">
+                        <div class="status-icon">🌐</div>
+                        <h3>可用节点</h3>
+                        <div class="status-indicator" id="dashboardNodes">0 个</div>
+                        <div class="status-details">解析的代理节点</div>
                     </div>
-                </div>
-
-                <div class="info-grid">
-                    <div class="info-item">
-                        <label>HTTP 端口:</label>
-                        <span id="httpPort">-</span>
-                    </div>
-                    <div class="info-item">
-                        <label>SOCKS 端口:</label>
-                        <span id="socksPort">-</span>
-                    </div>
-                    <div class="info-item">
-                        <label>当前节点:</label>
-                        <span id="currentNode">无</span>
+                    <div class="status-card hover-lift">
+                        <div class="status-icon">⚡</div>
+                        <h3>系统状态</h3>
+                        <div class="status-indicator" id="systemStatus">正常</div>
+                        <div class="status-details">CPU: <span id="cpuUsage">--</span>% | 内存: <span id="memUsage">--</span>%</div>
                     </div>
                 </div>
 
-                <div class="proxy-controls">
-                    <button id="refreshStatus" class="btn btn-primary">刷新状态</button>
-                    <button id="testConnection" class="btn btn-info">测试连接</button>
+                <!-- 快速信息面板 -->
+                <div class="dashboard-info-section">
+                    <h3>🎯 快速访问</h3>
+                    <div class="dashboard-quick-grid">
+                        <div class="quick-info-card" onclick="app.switchPanel('subscriptions')">
+                            <div class="quick-icon">📁</div>
+                            <div class="quick-content">
+                                <div class="quick-title">订阅管理</div>
+                                <div class="quick-desc">添加和管理订阅源</div>
+                            </div>
+                        </div>
+                        <div class="quick-info-card" onclick="app.switchPanel('nodes')">
+                            <div class="quick-icon">🌍</div>
+                            <div class="quick-content">
+                                <div class="quick-title">节点管理</div>
+                                <div class="quick-desc">连接和测试节点</div>
+                            </div>
+                        </div>
+                        <div class="quick-info-card" onclick="app.switchPanel('proxy')">
+                            <div class="quick-icon">⚙️</div>
+                            <div class="quick-content">
+                                <div class="quick-title">代理控制</div>
+                                <div class="quick-desc">管理活跃连接</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 基础操作 -->
+                <div class="dashboard-actions">
+                    <button id="refreshStatus" class="btn btn-primary">🔄 刷新状态</button>
                 </div>
             </div>
 
             <!-- 订阅管理 -->
             <div id="subscriptions" class="panel">
-                <h2>订阅管理</h2>
+                <h2>📋 订阅管理</h2>
                 
                 <div class="form-section">
                     <div class="form-group">
@@ -96,7 +129,22 @@
 
             <!-- 节点管理 -->
             <div id="nodes" class="panel">
-                <h2>节点管理</h2>
+                <h2>🌐 节点管理</h2>
+                
+                <div class="nodes-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">总节点数:</span>
+                        <span class="stat-value" id="totalNodes">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">可用节点:</span>
+                        <span class="stat-value" id="availableNodes">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">已选择:</span>
+                        <span class="stat-value" id="selectedNodesCount">0</span>
+                    </div>
+                </div>
                 
                 <div class="nodes-controls">
                     <button id="selectAllNodes" class="btn btn-secondary">全选</button>
@@ -114,25 +162,95 @@
 
             <!-- 代理控制 -->
             <div id="proxy" class="panel">
-                <h2>代理控制</h2>
+                <h2>⚙️ 代理控制</h2>
                 
-                <div class="proxy-controls">
-                    <div class="action-group">
-                        <h3>V2Ray</h3>
-                        <button id="startV2ray" class="btn btn-success">启动</button>
-                        <button id="stopV2ray" class="btn btn-danger">停止</button>
+                <!-- 活跃连接管理 - 核心功能 -->
+                <div class="active-connections-section">
+                    <div class="connections-header">
+                        <h3>🔗 活跃代理连接</h3>
+                        <div class="connections-count">
+                            当前活跃: <span id="activeConnectionsCount">0</span> 个
+                        </div>
+                        <div class="connections-actions">
+                            <button onclick="app.loadActiveConnections()" class="btn btn-secondary btn-sm">🔄 刷新</button>
+                            <button onclick="app.stopAllConnections()" class="btn btn-danger btn-sm">🛑 停止所有</button>
+                        </div>
                     </div>
-                    <div class="action-group">
-                        <h3>Hysteria2</h3>
-                        <button id="startHysteria2" class="btn btn-success">启动</button>
-                        <button id="stopHysteria2" class="btn btn-danger">停止</button>
+                    <div id="activeConnectionsList" class="connections-list">
+                        <div class="placeholder">正在加载连接信息...</div>
+                    </div>
+                </div>
+
+                <!-- 系统代理状态 -->
+                <div class="system-proxy-section">
+                    <h3>🌐 系统代理状态</h3>
+                    <div class="proxy-status-grid">
+                        <div class="proxy-status-item">
+                            <div class="proxy-icon">🔥</div>
+                            <div class="proxy-details">
+                                <div class="proxy-name">V2Ray 代理</div>
+                                <div class="proxy-status" id="v2rayProxyStatus">已停止</div>
+                            </div>
+                        </div>
+                        <div class="proxy-status-item">
+                            <div class="proxy-icon">⚡</div>
+                            <div class="proxy-details">
+                                <div class="proxy-name">Hysteria2 代理</div>
+                                <div class="proxy-status" id="hysteria2ProxyStatus">已停止</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 连接信息概览 -->
+                <div class="connection-overview">
+                    <h3>📊 连接概览</h3>
+                    <div class="overview-grid">
+                        <div class="overview-item">
+                            <div class="overview-icon">🎯</div>
+                            <div class="overview-content">
+                                <div class="overview-value" id="totalConnections">0</div>
+                                <div class="overview-label">总连接数</div>
+                            </div>
+                        </div>
+                        <div class="overview-item">
+                            <div class="overview-icon">⚡</div>
+                            <div class="overview-content">
+                                <div class="overview-value" id="avgLatency">--</div>
+                                <div class="overview-label">平均延迟</div>
+                            </div>
+                        </div>
+                        <div class="overview-item">
+                            <div class="overview-icon">📈</div>
+                            <div class="overview-content">
+                                <div class="overview-value" id="successRate">100%</div>
+                                <div class="overview-label">成功率</div>
+                            </div>
+                        </div>
+                        <div class="overview-item">
+                            <div class="overview-icon">📊</div>
+                            <div class="overview-content">
+                                <div class="overview-value" id="dataTransfer">0 MB</div>
+                                <div class="overview-label">流量统计</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快速操作 -->
+                <div class="proxy-quick-actions">
+                    <h3>⚡ 快速操作</h3>
+                    <div class="quick-actions-simple">
+                        <button onclick="app.testConnection()" class="btn btn-info">🔗 测试连接</button>
+                        <button onclick="app.refreshStatus()" class="btn btn-secondary">🔄 刷新状态</button>
+                        <button onclick="app.exportConfiguration()" class="btn btn-success">📥 导出配置</button>
                     </div>
                 </div>
             </div>
 
             <!-- 测速工具 -->
             <div id="speedtest" class="panel">
-                <h2>测速工具</h2>
+                <h2>🚄 测速工具</h2>
                 
                 <div class="speedtest-controls">
                     <button id="quickTest" class="btn btn-info">快速测试</button>
@@ -147,7 +265,7 @@
 
             <!-- 设置 -->
             <div id="settings" class="panel">
-                <h2>设置</h2>
+                <h2>⚙️ 系统设置</h2>
                 
                 <div class="settings-form">
                     <div class="form-group">
