@@ -141,6 +141,20 @@ type Settings struct {
 	TestURL   string `json:"test_url"`
 }
 
+// ActiveConnection 活跃的代理连接
+type ActiveConnection struct {
+	SubscriptionID   string    `json:"subscription_id"`
+	SubscriptionName string    `json:"subscription_name"`
+	NodeIndex        int       `json:"node_index"`
+	NodeName         string    `json:"node_name"`
+	Protocol         string    `json:"protocol"`
+	HTTPPort         int       `json:"http_port"`
+	SOCKSPort        int       `json:"socks_port"`
+	Server           string    `json:"server"`
+	ConnectTime      time.Time `json:"connect_time"`
+	IsActive         bool      `json:"is_active"`
+}
+
 // BatchTestProgress 批量测试进度
 type BatchTestProgress struct {
 	Type          string          `json:"type"`           // 事件类型: start, progress, complete, error

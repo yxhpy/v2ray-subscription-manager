@@ -368,11 +368,13 @@ func (h *NodeHandler) BatchTestNodesSSE(w http.ResponseWriter, r *http.Request) 
 			if clientConnected {
 				// 检查是否是取消错误
 				if testCtx.Err() != nil {
+					fmt.Printf("DEBUG: 发送取消事件: %v\n", err)
 					h.sendSSEEvent(w, "cancelled", map[string]interface{}{
 						"message": "批量测试已被取消",
 						"reason":  err.Error(),
 					})
 				} else {
+					fmt.Printf("DEBUG: 发送错误事件: %v\n", err)
 					h.sendSSEError(w, "批量测试失败: "+err.Error())
 				}
 			}
@@ -440,6 +442,47 @@ func (h *NodeHandler) sendSSEError(w http.ResponseWriter, message string) {
 func (h *NodeHandler) writeJSONResponse(w http.ResponseWriter, response *models.APIResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// DeleteNodes 删除节点
+func (h *NodeHandler) DeleteNodes(w http.ResponseWriter, r *http.Request) {
+	response := models.NewAPIResponse()
+
+	var req models.BatchNodeOperationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.SetError(err, "请求参数错误")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	if req.SubscriptionID == "" {
+		response.SetError(fmt.Errorf("缺少订阅ID"), "订阅ID不能为空")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	if len(req.NodeIndexes) == 0 {
+		response.SetError(fmt.Errorf("缺少节点索引"), "节点索引列表不能为空")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	fmt.Printf("DEBUG: 删除节点请求 - subscription_id: %s, node_indexes: %v\n", req.SubscriptionID, req.NodeIndexes)
+
+	// 调用节点服务删除节点
+	err := h.nodeService.DeleteNodes(req.SubscriptionID, req.NodeIndexes)
+	if err != nil {
+		fmt.Printf("ERROR: 删除节点失败: %v\n", err)
+		response.SetError(err, "删除节点失败")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	response.SetSuccess(map[string]interface{}{
+		"deleted_count": len(req.NodeIndexes),
+		"node_indexes":  req.NodeIndexes,
+	}, fmt.Sprintf("成功删除 %d 个节点", len(req.NodeIndexes)))
+	h.writeJSONResponse(w, response)
 }
 
 // CancelBatchTest 取消批量测试

@@ -41,12 +41,12 @@ func (h *StatusHandler) RenderIndex(w http.ResponseWriter, r *http.Request) {
 	templatePaths := []string{
 		"cmd/web-ui/templates/index.html", // 从项目根目录运行时
 		"templates/index.html",            // 从 cmd/web-ui 目录运行时
-		"../../web/test_batch.html",       // 如果有备用页面
 	}
 
 	var templatePath string
 	for _, path := range templatePaths {
-		if _, err := http.Dir(".").Open(path); err == nil {
+		if info, err := http.Dir(".").Open(path); err == nil {
+			info.Close()
 			templatePath = path
 			break
 		}
