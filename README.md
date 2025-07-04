@@ -10,7 +10,7 @@
 
 **🌟 一个现代化、高性能的 V2Ray 订阅管理和代理测速工具**
 
-*支持多协议解析 | 智能代理管理 | 高并发测速 | 双进程架构*
+*支持多协议解析 | 智能代理管理 | 高并发测速 | 现代化Web UI | 端口冲突检测*
 
 </div>
 
@@ -28,6 +28,8 @@ V2Ray 订阅管理器是一个功能强大的代理管理工具，专为现代�
 - 🌐 **多协议支持** - 完整支持 VLESS、Shadowsocks、Hysteria2 等主流协议
 - 📊 **专业报告** - 生成详细的测速报告，支持多种格式导出
 - 🔒 **稳定可靠** - 完善的错误处理和资源清理机制，确保系统稳定运行
+- 🎨 **现代化 Web UI** - 响应式设计，实时状态更新，移动端友好
+- 🛡️ **端口冲突检测** - 智能检测和解决端口冲突，自动化连接管理
 
 ---
 
@@ -58,6 +60,10 @@ V2Ray 订阅管理器是一个功能强大的代理管理工具，专为现代�
 - ✅ 实时状态监控和更新
 - ✅ 移动设备友好支持
 - ✅ 无需命令行操作
+- ✅ 端口冲突智能检测与解决
+- ✅ 数据库状态一致性管理
+- ✅ 固定端口和随机端口双模式
+- ✅ 节点连接状态持久化
 
 </td>
 <td width="50%">
@@ -69,6 +75,9 @@ V2Ray 订阅管理器是一个功能强大的代理管理工具，专为现代�
 - ✅ 代理状态实时监控
 - ✅ 连接测试和健康检查
 - ✅ 状态持久化和恢复
+- ✅ 固定端口冲突自动检测
+- ✅ 用户确认后自动断开冲突连接
+- ✅ 数据库状态自动同步
 
 ### 📊 测速工作流
 - ✅ 批量节点测速（支持 300+ 节点）
@@ -91,6 +100,11 @@ verify_v2ray_ui2/
 ├── 📁 cmd/                         # 程序入口
 │   ├── v2ray-manager/              # 主程序
 │   ├── web-ui/                     # 🌐 Web UI 服务器
+│   │   ├── handlers/               # HTTP 请求处理器
+│   │   ├── services/               # 业务逻辑层
+│   │   ├── database/               # 数据库访问层
+│   │   ├── models/                 # 数据模型
+│   │   └── middleware/             # 中间件
 │   └── cleanup.go                  # 清理工具
 ├── 📁 web/                         # 🎨 Web UI 资源
 │   └── static/                     # 静态文件
@@ -108,7 +122,8 @@ verify_v2ray_ui2/
 ├── 📁 configs/                     # ⚙️ 配置文件模板
 ├── 📁 scripts/                     # 📜 构建和发布脚本
 ├── 📁 docs/                        # 📚 项目文档
-└── demo_webui.sh                   # 🚀 Web UI 演示脚本
+├── 📁 data/                        # 💾 数据库文件
+└── start_web_ui.sh                 # 🚀 Web UI 启动脚本
 ```
 
 ---
@@ -142,10 +157,18 @@ git clone https://github.com/yxhpy/v2ray-subscription-manager.git
 cd v2ray-subscription-manager
 
 # 一键启动 Web UI
-./demo_webui.sh
+./start_web_ui.sh
 ```
 
 然后在浏览器中访问 `http://localhost:8888` 即可使用图形化界面！
+
+**Web UI 特性：**
+- 🎨 现代化响应式界面设计
+- 📱 移动端友好支持
+- 🔄 实时状态更新
+- 🛡️ 端口冲突智能检测
+- 💾 数据库状态持久化
+- 🎯 固定端口和随机端口双模式
 
 </details>
 
@@ -154,13 +177,13 @@ cd v2ray-subscription-manager
 
 ```bash
 # 构建 Web UI
-./scripts/build_webui.sh
+go build -o web-ui cmd/web-ui/main.go
 
 # 启动 Web UI（默认端口 8888）
-./bin/v2ray-webui-<platform>
+./web-ui
 
 # 或指定端口
-./bin/v2ray-webui-<platform> 9999
+./web-ui 9999
 ```
 
 </details>
@@ -362,9 +385,57 @@ go build -o bin/cleanup ./cmd/cleanup.go
 # ✅ 终止所有相关进程
 # ✅ 安全清理，不删除重要配置
 # ✅ 详细清理日志显示
+# ✅ 重置数据库连接状态
 ```
 
 </details>
+
+### 🛠️ 端口冲突测试
+
+<details>
+<summary><b>🔍 端口冲突测试工具</b></summary>
+
+```bash
+# 启动 Web UI 后，使用测试工具验证端口冲突处理
+# 在浏览器中打开以下测试页面：
+
+# 基础端口冲突测试
+open web/static/test_conflict.html
+
+# 高级端口冲突测试
+open web/static/test_conflict_advanced.html
+
+# 测试功能：
+# ✅ 固定端口冲突检测
+# ✅ 冲突节点信息显示
+# ✅ 用户确认后自动断开冲突连接
+# ✅ 数据库状态一致性验证
+# ✅ 页面刷新后状态持久化测试
+```
+
+</details>
+
+---
+
+## 🗄️ 数据库与状态管理
+
+### 📊 数据库架构
+- **数据库类型**: SQLite
+- **存储位置**: `data/v2ray_manager.db`
+- **主要表格**: subscriptions, nodes, proxy_status
+- **自动迁移**: 启动时自动处理数据库迁移
+
+### 🔄 状态一致性
+- **启动时清理**: 自动清理无效的节点状态
+- **连接状态同步**: 数据库状态与实际连接状态保持一致
+- **端口冲突处理**: 智能检测并解决端口冲突
+- **状态持久化**: 节点连接状态跨会话持久化
+
+### 🛡️ 端口管理
+- **固定端口模式**: 支持用户指定固定端口（HTTP: 7890, SOCKS: 7891）
+- **随机端口模式**: 系统自动分配可用端口
+- **冲突检测**: 自动检测端口冲突并提供解决方案
+- **用户确认**: 端口冲突时提供详细信息并要求用户确认
 
 ---
 
@@ -468,6 +539,8 @@ go build -o bin/cleanup ./cmd/cleanup.go
 - **Go 版本**: 1.21+
 - **操作系统**: Windows, Linux, macOS
 - **架构**: amd64, arm64
+- **浏览器**: Chrome, Firefox, Safari, Edge（支持现代 JavaScript）
+- **网络**: 需要网络连接以获取订阅和测试节点
 
 ### 🏗️ 构建项目
 
@@ -484,6 +557,28 @@ go mod tidy
 
 # 构建当前平台版本
 go build -o v2ray-manager ./cmd/v2ray-manager/
+
+# 构建 Web UI
+go build -o web-ui ./cmd/web-ui/
+
+# 构建清理工具
+go build -o bin/cleanup ./cmd/cleanup.go
+```
+
+### 🚀 启动方式
+
+```bash
+# 方式一：使用启动脚本（推荐）
+./start_web_ui.sh
+
+# 方式二：直接运行 Web UI
+./web-ui
+
+# 方式三：指定端口运行
+./web-ui 9999
+
+# 方式四：开发模式运行
+go run ./cmd/web-ui/main.go
 ```
 
 ### 🚀 发布流程
