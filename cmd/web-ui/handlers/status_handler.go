@@ -137,3 +137,39 @@ func (h *StatusHandler) writeJSONResponse(w http.ResponseWriter, response *model
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// GetSettings 获取系统设置
+func (h *StatusHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	response := models.NewAPIResponse()
+
+	settings, err := h.systemService.GetSettings()
+	if err != nil {
+		response.SetError(err, "获取系统设置失败")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	response.SetSuccess(settings, "获取系统设置成功")
+	h.writeJSONResponse(w, response)
+}
+
+// SaveSettings 保存系统设置
+func (h *StatusHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
+	response := models.NewAPIResponse()
+
+	var settings models.Settings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		response.SetError(err, "请求参数错误")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	if err := h.systemService.SaveSettings(&settings); err != nil {
+		response.SetError(err, "保存系统设置失败")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	response.SetSuccess(settings, "系统设置保存成功")
+	h.writeJSONResponse(w, response)
+}

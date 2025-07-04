@@ -11,8 +11,8 @@
         <!-- 标题栏 -->
         <header class="header">
             <div class="header-left">
-                <h1>🚀 V2Ray 订阅管理器</h1>
-                <p class="header-subtitle">智能代理节点管理平台</p>
+                <h1>V2Ray 订阅管理器</h1>
+                <p class="header-subtitle">代理节点管理平台</p>
             </div>
             <div class="header-right">
                 <div class="version">v2.1.0</div>
@@ -26,7 +26,6 @@
             <a href="#" class="nav-item" data-panel="subscriptions">订阅管理</a>
             <a href="#" class="nav-item" data-panel="nodes">节点管理</a>
             <a href="#" class="nav-item" data-panel="proxy">代理控制</a>
-            <a href="#" class="nav-item" data-panel="speedtest">测速工具</a>
             <a href="#" class="nav-item" data-panel="settings">设置</a>
         </nav>
 
@@ -37,30 +36,26 @@
         <main class="main">
             <!-- 仪表板 -->
             <div id="dashboard" class="panel active">
-                <h2>📊 系统概览</h2>
+                <h2>系统概览</h2>
                 
                 <!-- 核心状态卡片 -->
                 <div class="status-grid">
-                    <div class="status-card hover-lift">
-                        <div class="status-icon">🔗</div>
+                    <div class="status-card">
                         <h3>活跃连接</h3>
                         <div class="status-indicator" id="dashboardActiveConnections">0 个</div>
                         <div class="status-details">当前运行的代理连接</div>
                     </div>
-                    <div class="status-card hover-lift">
-                        <div class="status-icon">📋</div>
+                    <div class="status-card">
                         <h3>订阅管理</h3>
                         <div class="status-indicator" id="dashboardSubscriptions">0 个</div>
                         <div class="status-details">已配置的订阅源</div>
                     </div>
-                    <div class="status-card hover-lift">
-                        <div class="status-icon">🌐</div>
+                    <div class="status-card">
                         <h3>可用节点</h3>
                         <div class="status-indicator" id="dashboardNodes">0 个</div>
                         <div class="status-details">解析的代理节点</div>
                     </div>
-                    <div class="status-card hover-lift">
-                        <div class="status-icon">⚡</div>
+                    <div class="status-card">
                         <h3>系统状态</h3>
                         <div class="status-indicator" id="systemStatus">正常</div>
                         <div class="status-details">CPU: <span id="cpuUsage">--</span>% | 内存: <span id="memUsage">--</span>%</div>
@@ -69,24 +64,21 @@
 
                 <!-- 快速信息面板 -->
                 <div class="dashboard-info-section">
-                    <h3>🎯 快速访问</h3>
+                    <h3>快速访问</h3>
                     <div class="dashboard-quick-grid">
                         <div class="quick-info-card" onclick="app.switchPanel('subscriptions')">
-                            <div class="quick-icon">📁</div>
                             <div class="quick-content">
                                 <div class="quick-title">订阅管理</div>
                                 <div class="quick-desc">添加和管理订阅源</div>
                             </div>
                         </div>
                         <div class="quick-info-card" onclick="app.switchPanel('nodes')">
-                            <div class="quick-icon">🌍</div>
                             <div class="quick-content">
                                 <div class="quick-title">节点管理</div>
                                 <div class="quick-desc">连接和测试节点</div>
                             </div>
                         </div>
                         <div class="quick-info-card" onclick="app.switchPanel('proxy')">
-                            <div class="quick-icon">⚙️</div>
                             <div class="quick-content">
                                 <div class="quick-title">代理控制</div>
                                 <div class="quick-desc">管理活跃连接</div>
@@ -97,13 +89,13 @@
 
                 <!-- 基础操作 -->
                 <div class="dashboard-actions">
-                    <button id="refreshStatus" class="btn btn-primary">🔄 刷新状态</button>
+                    <button id="refreshStatus" class="btn btn-primary">刷新状态</button>
                 </div>
             </div>
 
             <!-- 订阅管理 -->
             <div id="subscriptions" class="panel">
-                <h2>📋 订阅管理</h2>
+                <h2>订阅管理</h2>
                 
                 <div class="form-section">
                     <div class="form-group">
@@ -129,7 +121,7 @@
 
             <!-- 节点管理 -->
             <div id="nodes" class="panel">
-                <h2>🌐 节点管理</h2>
+                <h2>节点管理</h2>
                 
                 <div class="nodes-stats">
                     <div class="stat-item">
@@ -162,18 +154,18 @@
 
             <!-- 代理控制 -->
             <div id="proxy" class="panel">
-                <h2>⚙️ 代理控制</h2>
+                <h2>代理控制</h2>
                 
                 <!-- 活跃连接管理 - 核心功能 -->
                 <div class="active-connections-section">
                     <div class="connections-header">
-                        <h3>🔗 活跃代理连接</h3>
+                        <h3>活跃代理连接</h3>
                         <div class="connections-count">
                             当前活跃: <span id="activeConnectionsCount">0</span> 个
                         </div>
                         <div class="connections-actions">
-                            <button onclick="app.loadActiveConnections()" class="btn btn-secondary btn-sm">🔄 刷新</button>
-                            <button onclick="app.stopAllConnections()" class="btn btn-danger btn-sm">🛑 停止所有</button>
+                            <button onclick="app.loadActiveConnections()" class="btn btn-secondary btn-sm">刷新</button>
+                            <button onclick="app.stopAllConnections()" class="btn btn-danger btn-sm">停止所有</button>
                         </div>
                     </div>
                     <div id="activeConnectionsList" class="connections-list">
@@ -183,17 +175,15 @@
 
                 <!-- 系统代理状态 -->
                 <div class="system-proxy-section">
-                    <h3>🌐 系统代理状态</h3>
+                    <h3>系统代理状态</h3>
                     <div class="proxy-status-grid">
                         <div class="proxy-status-item">
-                            <div class="proxy-icon">🔥</div>
                             <div class="proxy-details">
                                 <div class="proxy-name">V2Ray 代理</div>
                                 <div class="proxy-status" id="v2rayProxyStatus">已停止</div>
                             </div>
                         </div>
                         <div class="proxy-status-item">
-                            <div class="proxy-icon">⚡</div>
                             <div class="proxy-details">
                                 <div class="proxy-name">Hysteria2 代理</div>
                                 <div class="proxy-status" id="hysteria2ProxyStatus">已停止</div>
@@ -204,31 +194,27 @@
 
                 <!-- 连接信息概览 -->
                 <div class="connection-overview">
-                    <h3>📊 连接概览</h3>
+                    <h3>连接概览</h3>
                     <div class="overview-grid">
                         <div class="overview-item">
-                            <div class="overview-icon">🎯</div>
                             <div class="overview-content">
                                 <div class="overview-value" id="totalConnections">0</div>
                                 <div class="overview-label">总连接数</div>
                             </div>
                         </div>
                         <div class="overview-item">
-                            <div class="overview-icon">⚡</div>
                             <div class="overview-content">
                                 <div class="overview-value" id="avgLatency">--</div>
                                 <div class="overview-label">平均延迟</div>
                             </div>
                         </div>
                         <div class="overview-item">
-                            <div class="overview-icon">📈</div>
                             <div class="overview-content">
                                 <div class="overview-value" id="successRate">100%</div>
                                 <div class="overview-label">成功率</div>
                             </div>
                         </div>
                         <div class="overview-item">
-                            <div class="overview-icon">📊</div>
                             <div class="overview-content">
                                 <div class="overview-value" id="dataTransfer">0 MB</div>
                                 <div class="overview-label">流量统计</div>
@@ -239,51 +225,143 @@
 
                 <!-- 快速操作 -->
                 <div class="proxy-quick-actions">
-                    <h3>⚡ 快速操作</h3>
+                    <h3>快速操作</h3>
                     <div class="quick-actions-simple">
-                        <button onclick="app.testConnection()" class="btn btn-info">🔗 测试连接</button>
-                        <button onclick="app.refreshStatus()" class="btn btn-secondary">🔄 刷新状态</button>
-                        <button onclick="app.exportConfiguration()" class="btn btn-success">📥 导出配置</button>
+                        <button onclick="app.testConnection()" class="btn btn-info">测试连接</button>
+                        <button onclick="app.refreshStatus()" class="btn btn-secondary">刷新状态</button>
+                        <button onclick="app.exportConfiguration()" class="btn btn-success">导出配置</button>
                     </div>
                 </div>
             </div>
 
-            <!-- 测速工具 -->
-            <div id="speedtest" class="panel">
-                <h2>🚄 测速工具</h2>
-                
-                <div class="speedtest-controls">
-                    <button id="quickTest" class="btn btn-info">快速测试</button>
-                    <button id="fullTest" class="btn btn-primary">完整测试</button>
-                </div>
-
-                <div class="test-results">
-                    <h3>测试结果</h3>
-                    <div id="testResults" class="placeholder">暂无测试结果</div>
-                </div>
-            </div>
 
             <!-- 设置 -->
             <div id="settings" class="panel">
-                <h2>⚙️ 系统设置</h2>
+                <h2>系统设置</h2>
                 
-                <div class="settings-form">
-                    <div class="form-group">
-                        <label for="httpPortSetting">HTTP 代理端口:</label>
-                        <input type="number" id="httpPortSetting" value="8888" min="1024" max="65535">
-                    </div>
-                    <div class="form-group">
-                        <label for="socksPortSetting">SOCKS 代理端口:</label>
-                        <input type="number" id="socksPortSetting" value="1080" min="1024" max="65535">
-                    </div>
-                    <div class="form-group">
-                        <label for="testUrlSetting">测试 URL:</label>
-                        <input type="text" id="testUrlSetting" value="https://www.google.com">
-                    </div>
-                    <div class="form-buttons">
-                        <button id="saveSettings" class="btn btn-primary">保存设置</button>
+                <!-- 代理设置 -->
+                <div class="settings-section">
+                    <h3>代理配置</h3>
+                    <div class="settings-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="httpPortSetting">HTTP 代理端口:</label>
+                                <input type="number" id="httpPortSetting" value="8888" min="1024" max="65535">
+                                <small class="form-help">用于HTTP协议代理，建议范围 8000-9000</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="socksPortSetting">SOCKS 代理端口:</label>
+                                <input type="number" id="socksPortSetting" value="1080" min="1024" max="65535">
+                                <small class="form-help">用于SOCKS5协议代理，建议范围 1080-1090</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="allowLanSetting">允许局域网连接:</label>
+                            <div class="switch">
+                                <input type="checkbox" id="allowLanSetting">
+                                <span class="switch-slider"></span>
+                            </div>
+                            <small class="form-help">允许局域网内其他设备连接代理</small>
+                        </div>
                     </div>
                 </div>
+
+                <!-- 测试设置 -->
+                <div class="settings-section">
+                    <h3>测试配置</h3>
+                    <div class="settings-form">
+                        <div class="form-group">
+                            <label for="testUrlSetting">测试 URL:</label>
+                            <input type="url" id="testUrlSetting" value="https://www.google.com" placeholder="https://www.google.com">
+                            <small class="form-help">用于节点连通性测试的URL地址</small>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="testTimeoutSetting">测试超时 (秒):</label>
+                                <input type="number" id="testTimeoutSetting" value="30" min="5" max="300">
+                                <small class="form-help">单个节点测试的超时时间</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="maxConcurrentSetting">最大并发数:</label>
+                                <input type="number" id="maxConcurrentSetting" value="3" min="1" max="10">
+                                <small class="form-help">批量测试时的最大并发线程数</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="retryCountSetting">重试次数:</label>
+                            <input type="number" id="retryCountSetting" value="2" min="0" max="5">
+                            <small class="form-help">测试失败时的重试次数</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 订阅设置 -->
+                <div class="settings-section">
+                    <h3>订阅配置</h3>
+                    <div class="settings-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="updateIntervalSetting">自动更新间隔 (小时):</label>
+                                <input type="number" id="updateIntervalSetting" value="24" min="1" max="168">
+                                <small class="form-help">订阅自动更新的时间间隔，0表示禁用</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="userAgentSetting">User-Agent:</label>
+                                <input type="text" id="userAgentSetting" value="V2Ray/1.0" placeholder="V2Ray/1.0">
+                                <small class="form-help">获取订阅时使用的User-Agent</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="autoTestNewNodesSetting">自动测试新节点:</label>
+                            <div class="switch">
+                                <input type="checkbox" id="autoTestNewNodesSetting" checked>
+                                <span class="switch-slider"></span>
+                            </div>
+                            <small class="form-help">新解析的节点是否自动进行连通性测试</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 安全设置 -->
+                <div class="settings-section">
+                    <h3>安全配置</h3>
+                    <div class="settings-form">
+                        <div class="form-group">
+                            <label for="enableLogsSetting">启用日志记录:</label>
+                            <div class="switch">
+                                <input type="checkbox" id="enableLogsSetting" checked>
+                                <span class="switch-slider"></span>
+                            </div>
+                            <small class="form-help">记录系统操作和错误日志</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="logLevelSetting">日志级别:</label>
+                            <select id="logLevelSetting">
+                                <option value="error">错误</option>
+                                <option value="warning">警告</option>
+                                <option value="info" selected>信息</option>
+                                <option value="debug">调试</option>
+                            </select>
+                            <small class="form-help">设置日志记录的详细程度</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="dataRetentionSetting">数据保留天数:</label>
+                            <input type="number" id="dataRetentionSetting" value="30" min="1" max="365">
+                            <small class="form-help">测试结果和日志的保留天数</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="settings-actions">
+                    <button id="saveSettings" class="btn btn-primary">保存设置</button>
+                    <button id="resetSettings" class="btn btn-secondary">重置默认</button>
+                    <button id="exportSettings" class="btn btn-info">导出配置</button>
+                    <button id="importSettings" class="btn btn-warning">导入配置</button>
+                </div>
+
+                <!-- 设置状态 -->
+                <div id="settingsStatus" class="settings-status"></div>
             </div>
         </main>
     </div>

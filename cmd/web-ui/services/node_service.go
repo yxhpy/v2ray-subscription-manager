@@ -25,6 +25,7 @@ import (
 type NodeServiceImpl struct {
 	subscriptionService SubscriptionService
 	proxyService        ProxyService
+	systemService       SystemService  // 添加系统服务依赖
 
 	// 数据库操作
 	nodeDB         *database.NodeDB
@@ -43,6 +44,11 @@ type NodeServiceImpl struct {
 
 	// 端口分配计数器（用于批量测试时避免端口冲突）
 	portCounter int64
+	
+	// 测试配置缓存
+	testTimeout   time.Duration
+	maxConcurrent int
+	retryCount    int
 }
 
 // NodeConnection 节点连接信息
@@ -53,6 +59,9 @@ type NodeConnection struct {
 	SOCKSPort        int
 	Protocol         string
 	IsActive         bool
+	Node             *types.Node  // 添加节点信息
+	SubscriptionID   string       // 添加订阅ID
+	NodeIndex        int          // 添加节点索引
 }
 
 // NewNodeService 创建节点服务
@@ -66,12 +75,119 @@ func NewNodeService(subscriptionService SubscriptionService, proxyService ProxyS
 		nodeConnections:     make(map[string]*NodeConnection),
 		nodeStates:          make(map[string]*models.NodeInfo),
 		portCounter:         9000, // 测试端口从9000开始
+		// 默认测试配置
+		testTimeout:   30 * time.Second,
+		maxConcurrent: 3,
+		retryCount:    2,
 	}
 
 	// 初始化MVP测试器
 	service.mvpTester = workflow.NewMVPTester("")
 
+	// 启动时清理节点状态，确保数据库状态与实际运行状态一致
+	service.cleanupNodeStatesOnStartup()
+
 	return service
+}
+
+// NewNodeServiceWithSystemService 创建带系统服务的节点服务
+func NewNodeServiceWithSystemService(subscriptionService SubscriptionService, proxyService ProxyService, systemService SystemService) NodeService {
+	db := database.GetDB()
+	service := &NodeServiceImpl{
+		subscriptionService: subscriptionService,
+		proxyService:        proxyService,
+		systemService:       systemService,
+		nodeDB:              database.NewNodeDB(db),
+		testResultDB:        database.NewTestResultDB(db),
+		nodeConnections:     make(map[string]*NodeConnection),
+		nodeStates:          make(map[string]*models.NodeInfo),
+		portCounter:         9000, // 测试端口从9000开始
+		// 默认测试配置
+		testTimeout:   30 * time.Second,
+		maxConcurrent: 3,
+		retryCount:    2,
+	}
+
+	// 从系统设置加载测试配置
+	service.loadTestConfigFromSettings()
+
+	// 初始化MVP测试器
+	service.mvpTester = workflow.NewMVPTester("")
+
+	// 启动时清理节点状态，确保数据库状态与实际运行状态一致
+	service.cleanupNodeStatesOnStartup()
+
+	return service
+}
+
+// loadTestConfigFromSettings 从系统设置加载测试配置
+func (n *NodeServiceImpl) loadTestConfigFromSettings() {
+	if n.systemService == nil {
+		return
+	}
+	
+	settings, err := n.systemService.GetSettings()
+	if err != nil {
+		fmt.Printf("⚠️  加载测试设置失败，使用默认值: %v\n", err)
+		return
+	}
+	
+	if settings.TestTimeout > 0 {
+		n.testTimeout = time.Duration(settings.TestTimeout) * time.Second
+		fmt.Printf("⏱️  使用设置中的测试超时: %v\n", n.testTimeout)
+	}
+	
+	if settings.MaxConcurrent > 0 {
+		n.maxConcurrent = settings.MaxConcurrent
+		fmt.Printf("🔀 使用设置中的最大并发数: %d\n", n.maxConcurrent)
+	}
+	
+	if settings.RetryCount >= 0 {
+		n.retryCount = settings.RetryCount
+		fmt.Printf("🔄 使用设置中的重试次数: %d\n", n.retryCount)
+	}
+}
+
+// getTestURL 获取测试URL（从设置中或使用默认值）
+func (n *NodeServiceImpl) getTestURL() string {
+	if n.systemService == nil {
+		return "https://www.google.com"
+	}
+	
+	settings, err := n.systemService.GetSettings()
+	if err != nil || settings.TestURL == "" {
+		return "https://www.google.com"
+	}
+	
+	return settings.TestURL
+}
+
+// getFixedHTTPPort 获取固定HTTP端口（从设置中或使用默认值）
+func (n *NodeServiceImpl) getFixedHTTPPort() int {
+	if n.systemService == nil {
+		return 8888 // 默认HTTP端口
+	}
+	
+	settings, err := n.systemService.GetSettings()
+	if err != nil || settings.HTTPPort <= 0 {
+		return 8888 // 默认HTTP端口
+	}
+	
+	return settings.HTTPPort
+}
+
+// getFixedSOCKSPort 获取固定SOCKS端口（从设置中或使用默认值）
+func (n *NodeServiceImpl) getFixedSOCKSPort() int {
+	if n.systemService == nil {
+		return 1080 // 默认SOCKS端口
+	}
+	
+	settings, err := n.systemService.GetSettings()
+	if err != nil || settings.SOCKSPort <= 0 {
+		return 1080 // 默认SOCKS端口
+	}
+	
+	return settings.SOCKSPort
 }
 
 // ConnectNode 连接节点（并发安全）
@@ -131,10 +247,11 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 
 	case "http_fixed":
 		// 固定HTTP端口连接 - 使用系统配置的固定端口
-		fixedHTTPPort := 8090 // 系统配置的固定HTTP端口
+		fixedHTTPPort := n.getFixedHTTPPort()
 
 		// 检查端口是否被占用，如果被占用则停止占用该端口的连接
 		if n.isPortOccupied(fixedHTTPPort) {
+			fmt.Printf("🔔 检测到HTTP固定端口 %d 被占用，正在停止冲突连接\n", fixedHTTPPort)
 			n.stopConnectionsByPort(fixedHTTPPort)
 		}
 
@@ -149,10 +266,11 @@ func (n *NodeServiceImpl) ConnectNode(subscriptionID string, nodeIndex int, oper
 
 	case "socks_fixed":
 		// 固定SOCKS端口连接 - 使用系统配置的固定端口
-		fixedSOCKSPort := 1088 // 系统配置的固定SOCKS端口
+		fixedSOCKSPort := n.getFixedSOCKSPort()
 
 		// 检查端口是否被占用，如果被占用则停止占用该端口的连接
 		if n.isPortOccupied(fixedSOCKSPort) {
+			fmt.Printf("🔔 检测到SOCKS固定端口 %d 被占用，正在停止冲突连接\n", fixedSOCKSPort)
 			n.stopConnectionsByPort(fixedSOCKSPort)
 		}
 
@@ -207,17 +325,33 @@ func (n *NodeServiceImpl) TestNode(subscriptionID string, nodeIndex int) (*model
 		TestType: "connection",
 	}
 
-	// 执行真实的TCP连接测试
+	// 执行真实的TCP连接测试（带重试机制）
 	startTime := time.Now()
 
-	// 根据协议选择合适的测试方法
+	// 根据协议选择合适的测试方法，支持重试
 	var testErr error
-	if nodeInfo.Protocol == "hysteria2" {
-		// 测试Hysteria2节点
-		testErr = n.testHysteria2Node(nodeInfo.Node)
-	} else {
-		// 测试V2Ray节点
-		testErr = n.testV2RayNode(nodeInfo.Node)
+	maxRetries := n.retryCount
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			fmt.Printf("DEBUG: 节点 %s 第 %d 次重试测试\n", nodeInfo.Name, attempt)
+			time.Sleep(1 * time.Second) // 重试间隔
+		}
+		
+		if nodeInfo.Protocol == "hysteria2" {
+			// 测试Hysteria2节点
+			testErr = n.testHysteria2Node(nodeInfo.Node)
+		} else {
+			// 测试V2Ray节点
+			testErr = n.testV2RayNode(nodeInfo.Node)
+		}
+		
+		// 如果测试成功，跳出重试循环
+		if testErr == nil {
+			if attempt > 0 {
+				fmt.Printf("DEBUG: 节点 %s 在第 %d 次重试后测试成功\n", nodeInfo.Name, attempt)
+			}
+			break
+		}
 	}
 
 	latency := time.Since(startTime)
@@ -349,8 +483,8 @@ func (n *NodeServiceImpl) BatchTestNodesWithProgress(subscriptionID string, node
 		})
 	}
 
-	// 使用信号量控制并发数（最大2个并发）
-	semaphore := make(chan struct{}, 2)
+	// 使用信号量控制并发数（使用系统设置）
+	semaphore := make(chan struct{}, n.maxConcurrent)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -608,8 +742,8 @@ func (n *NodeServiceImpl) BatchTestNodesWithProgressAndContext(ctx context.Conte
 	default:
 	}
 
-	// 使用信号量控制并发数（最大2个并发）
-	semaphore := make(chan struct{}, 2)
+	// 使用信号量控制并发数（使用系统设置）
+	semaphore := make(chan struct{}, n.maxConcurrent)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -976,6 +1110,9 @@ func (n *NodeServiceImpl) startProxyForNodeWithConnection(subscriptionID string,
 		SOCKSPort:        actualSOCKSPort,
 		Protocol:         node.Protocol,
 		IsActive:         true,
+		Node:             node,
+		SubscriptionID:   subscriptionID,
+		NodeIndex:        nodeIndex,
 	}
 
 	// 添加到连接管理
@@ -994,16 +1131,33 @@ func (n *NodeServiceImpl) stopConnectionsByPort(port int) {
 	defer n.connectionMutex.Unlock()
 
 	var keysToRemove []string
+	stoppedCount := 0
+	
 	for key, connection := range n.nodeConnections {
 		if connection.IsActive && (connection.HTTPPort == port || connection.SOCKSPort == port) {
+			fmt.Printf("🔄 正在停止端口 %d 的连接: %s (节点: %s)\n", port, key, connection.Node.Name)
+			
+			// 停止代理连接
 			n.stopNodeConnection(connection)
+			
+			// 更新数据库中的节点状态和端口信息
+			n.setNodePorts(connection.SubscriptionID, connection.NodeIndex, 0, 0)
+			n.updateNodeStatus(connection.SubscriptionID, connection.NodeIndex, "idle")
+			
+			fmt.Printf("✅ 已更新节点状态: 订阅=%s, 索引=%d, 状态=idle\n", connection.SubscriptionID, connection.NodeIndex)
+			
 			keysToRemove = append(keysToRemove, key)
+			stoppedCount++
 		}
 	}
 
 	// 移除已停止的连接
 	for _, key := range keysToRemove {
 		delete(n.nodeConnections, key)
+	}
+	
+	if stoppedCount > 0 {
+		fmt.Printf("✅ 已成功停止 %d 个占用端口 %d 的连接，数据库状态已更新\n", stoppedCount, port)
 	}
 }
 
@@ -1046,9 +1200,18 @@ func (n *NodeServiceImpl) removeNodeConnection(subscriptionID string, nodeIndex 
 
 	if connection, exists := n.nodeConnections[key]; exists {
 		fmt.Printf("DEBUG: 移除节点连接 %s (端口: HTTP:%d, SOCKS:%d)\n", key, connection.HTTPPort, connection.SOCKSPort)
+		
+		// 停止代理连接
 		n.stopNodeConnection(connection)
+		
+		// 更新数据库中的节点状态和端口信息
+		n.setNodePorts(subscriptionID, nodeIndex, 0, 0)
+		n.updateNodeStatus(subscriptionID, nodeIndex, "idle")
+		
+		// 移除内存中的连接记录
 		delete(n.nodeConnections, key)
-		fmt.Printf("DEBUG: 节点连接 %s 已成功移除\n", key)
+		
+		fmt.Printf("✅ 节点连接 %s 已成功移除，数据库状态已更新\n", key)
 	} else {
 		fmt.Printf("DEBUG: 未找到要移除的节点连接 %s\n", key)
 	}
@@ -1316,13 +1479,14 @@ func (n *NodeServiceImpl) testProxyLatency(proxyURL string) error {
 				return url.Parse(proxyURL)
 			},
 		},
-		Timeout: 10 * time.Second,
+		Timeout: n.testTimeout,
 	}
 
-	// 测试访问Google
-	resp, err := client.Get("https://www.google.com")
+	// 测试访问配置的URL
+	testURL := n.getTestURL()
+	resp, err := client.Get(testURL)
 	if err != nil {
-		// 如果Google不可达，尝试其他网站
+		// 如果配置的URL不可达，尝试备用网站
 		resp, err = client.Get("https://httpbin.org/ip")
 		if err != nil {
 			return fmt.Errorf("无法通过代理访问测试网站: %v", err)
@@ -1345,7 +1509,7 @@ func (n *NodeServiceImpl) testDownloadSpeed(proxyURL string) (float64, error) {
 				return url.Parse(proxyURL)
 			},
 		},
-		Timeout: 30 * time.Second,
+		Timeout: n.testTimeout,
 	}
 
 	// 使用较小的测试文件进行快速测试
@@ -1384,7 +1548,7 @@ func (n *NodeServiceImpl) testUploadSpeed(proxyURL string) (float64, error) {
 				return url.Parse(proxyURL)
 			},
 		},
-		Timeout: 30 * time.Second,
+		Timeout: n.testTimeout,
 	}
 
 	// 创建1MB的测试数据
@@ -1524,6 +1688,41 @@ func (n *NodeServiceImpl) isPortOccupied(port int) bool {
 		}
 	}
 	return false
+}
+
+// GetPortConflictInfo 获取端口冲突的详细信息
+func (n *NodeServiceImpl) GetPortConflictInfo(port int) *models.PortConflictInfo {
+	n.connectionMutex.RLock()
+	defer n.connectionMutex.RUnlock()
+
+	// 查找占用该端口的连接
+	for _, connection := range n.nodeConnections {
+		if connection.IsActive && (connection.HTTPPort == port || connection.SOCKSPort == port) {
+			protocolType := "HTTP"
+			if connection.SOCKSPort == port {
+				protocolType = "SOCKS"
+			}
+			
+			return &models.PortConflictInfo{
+				HasConflict:     true,
+				Port:            port,
+				ProtocolType:    protocolType,
+				ConflictNodeIndex: connection.NodeIndex,
+				ConflictNodeName:  connection.Node.Name,
+				SubscriptionID:   connection.SubscriptionID,
+			}
+		}
+	}
+	
+	return &models.PortConflictInfo{
+		HasConflict: false,
+		Port:        port,
+	}
+}
+
+// CheckPortConflict 检查端口冲突
+func (n *NodeServiceImpl) CheckPortConflict(port int) (*models.PortConflictInfo, error) {
+	return n.GetPortConflictInfo(port), nil
 }
 
 // isPortAvailable 检查端口是否可用
@@ -1723,18 +1922,60 @@ func (n *NodeServiceImpl) StopAllNodeConnections() error {
 		fmt.Printf("🔌 停止连接: %s (协议:%s, HTTP:%d, SOCKS:%d)\n", 
 			key, connection.Protocol, connection.HTTPPort, connection.SOCKSPort)
 		
+		// 停止代理连接
 		n.stopNodeConnection(connection)
+		
+		// 更新数据库中的节点状态和端口信息
+		n.setNodePorts(connection.SubscriptionID, connection.NodeIndex, 0, 0)
+		n.updateNodeStatus(connection.SubscriptionID, connection.NodeIndex, "idle")
+		
+		fmt.Printf("✅ 已更新节点状态: 订阅=%s, 索引=%d, 状态=idle\n", connection.SubscriptionID, connection.NodeIndex)
+		
 		stoppedCount++
 	}
 	
 	// 清空所有连接
 	n.nodeConnections = make(map[string]*NodeConnection)
 	
-	fmt.Printf("✅ 已停止 %d 个节点连接\n", stoppedCount)
+	fmt.Printf("✅ 已停止 %d 个节点连接，数据库状态已全部更新\n", stoppedCount)
 	
 	if len(errors) > 0 {
 		return fmt.Errorf("停止部分连接时发生错误: %v", errors)
 	}
 	
 	return nil
+}
+
+// cleanupNodeStatesOnStartup 启动时清理节点状态
+func (n *NodeServiceImpl) cleanupNodeStatesOnStartup() {
+	fmt.Printf("🧹 正在清理启动时的节点状态...\n")
+	
+	// 获取所有订阅
+	subscriptions := n.subscriptionService.GetAllSubscriptions()
+	cleanedCount := 0
+	
+	for _, subscription := range subscriptions {
+		if subscription.Nodes == nil {
+			continue
+		}
+		
+		for i, nodeInfo := range subscription.Nodes {
+			// 检查节点是否标记为已连接但实际没有运行的代理进程
+			if nodeInfo.Status == "connected" || nodeInfo.Status == "connecting" {
+				// 重置为idle状态，因为系统重启后没有实际的连接
+				n.setNodePorts(subscription.ID, i, 0, 0)
+				n.updateNodeStatus(subscription.ID, i, "idle")
+				cleanedCount++
+				
+				fmt.Printf("🔄 重置节点状态: 订阅=%s, 节点=%d (%s), 状态=idle\n", 
+					subscription.ID, i, nodeInfo.Name)
+			}
+		}
+	}
+	
+	if cleanedCount > 0 {
+		fmt.Printf("✅ 启动清理完成，共重置 %d 个节点状态\n", cleanedCount)
+	} else {
+		fmt.Printf("✅ 启动清理完成，所有节点状态正常\n")
+	}
 }

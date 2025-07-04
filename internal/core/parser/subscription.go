@@ -15,7 +15,25 @@ import (
 
 // FetchSubscription 从URL获取订阅内容
 func FetchSubscription(url string) (string, error) {
-	resp, err := http.Get(url)
+	return FetchSubscriptionWithUserAgent(url, "")
+}
+
+// FetchSubscriptionWithUserAgent 从URL获取订阅内容，可指定User-Agent
+func FetchSubscriptionWithUserAgent(url, userAgent string) (string, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %v", err)
+	}
+
+	// 设置User-Agent
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	} else {
+		req.Header.Set("User-Agent", "V2Ray/1.0")  // 默认User-Agent
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("获取订阅失败: %v", err)
 	}

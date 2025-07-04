@@ -15,6 +15,7 @@ type ProxyServiceImpl struct {
 	hysteria2Manager *proxy.ProxyManager // 暂时使用同一个管理器类型
 	httpPort         int
 	socksPort        int
+	systemService    SystemService  // 添加系统服务依赖
 	mutex            sync.RWMutex
 }
 
@@ -25,6 +26,45 @@ func NewProxyService() ProxyService {
 		hysteria2Manager: proxy.NewProxyManager(),
 		httpPort:         8888, // 默认HTTP端口
 		socksPort:        1080, // 默认SOCKS端口
+	}
+}
+
+// NewProxyServiceWithSystemService 创建带系统服务的代理服务
+func NewProxyServiceWithSystemService(systemService SystemService) ProxyService {
+	service := &ProxyServiceImpl{
+		v2rayManager:     proxy.NewProxyManager(),
+		hysteria2Manager: proxy.NewProxyManager(),
+		systemService:    systemService,
+		httpPort:         8888, // 默认HTTP端口
+		socksPort:        1080, // 默认SOCKS端口
+	}
+	
+	// 从系统设置加载端口配置
+	service.loadPortsFromSettings()
+	
+	return service
+}
+
+// loadPortsFromSettings 从系统设置加载端口配置
+func (p *ProxyServiceImpl) loadPortsFromSettings() {
+	if p.systemService == nil {
+		return
+	}
+	
+	settings, err := p.systemService.GetSettings()
+	if err != nil {
+		fmt.Printf("⚠️  加载端口设置失败，使用默认值: %v\n", err)
+		return
+	}
+	
+	if settings.HTTPPort > 0 {
+		p.httpPort = settings.HTTPPort
+		fmt.Printf("📡 使用设置中的HTTP端口: %d\n", p.httpPort)
+	}
+	
+	if settings.SOCKSPort > 0 {
+		p.socksPort = settings.SOCKSPort
+		fmt.Printf("📡 使用设置中的SOCKS端口: %d\n", p.socksPort)
 	}
 }
 

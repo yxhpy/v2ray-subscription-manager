@@ -124,6 +124,18 @@ class V2RayUI {
         document.getElementById('saveSettings')?.addEventListener('click', () => {
             this.saveSettings();
         });
+        
+        document.getElementById('resetSettings')?.addEventListener('click', () => {
+            this.resetSettings();
+        });
+        
+        document.getElementById('exportSettings')?.addEventListener('click', () => {
+            this.exportSettings();
+        });
+        
+        document.getElementById('importSettings')?.addEventListener('click', () => {
+            this.importSettings();
+        });
 
         // 刷新状态
         document.getElementById('refreshStatus')?.addEventListener('click', () => {
@@ -189,30 +201,14 @@ class V2RayUI {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         
-        // 添加图标
-        const icons = {
-            'info': '📝',
-            'success': '✅',
-            'warning': '⚠️',
-            'error': '❌'
-        };
-        
-        notification.innerHTML = `${icons[type] || '📝'} ${message}`;
+        notification.innerHTML = message;
 
         notifications.appendChild(notification);
-
-        // 添加动画效果
-        notification.style.animation = 'slideInRight 0.4s ease';
 
         // 自动移除通知
         setTimeout(() => {
             if (notification.parentNode) {
-                notification.style.animation = 'slideOutRight 0.4s ease';
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                    }
-                }, 400);
+                notification.parentNode.removeChild(notification);
             }
         }, duration);
     }
@@ -222,6 +218,7 @@ class V2RayUI {
         this.showNotification('正在加载数据...', 'info');
         await this.loadStatus();
         await this.loadSubscriptions();
+        await this.loadSettings();
         this.showNotification('数据加载完成', 'success');
     }
 
@@ -246,6 +243,9 @@ class V2RayUI {
                 break;
             case 'proxy':
                 this.loadProxyStatus();
+                break;
+            case 'settings':
+                this.loadSettings();
                 break;
         }
     }
@@ -579,7 +579,7 @@ class V2RayUI {
                     <div class="node-header">
                         <h4>${node.name}</h4>
                         <span class="node-status ${statusClass}">${statusText}</span>
-                        ${node.is_running ? '<span class="running-indicator">🟢 运行中</span>' : ''}
+                        ${node.is_running ? '<span class="running-indicator">运行中</span>' : ''}
                     </div>
                     <div class="node-meta">
                         <span class="protocol">${node.protocol.toUpperCase()}</span>
@@ -669,8 +669,6 @@ class V2RayUI {
                         断开
                     </button>
                 ` : ''}
-            </div>
-            <div class="action-group">
                 <button class="btn btn-info btn-sm" 
                         onclick="app.testNode('${this.activeSubscriptionId}', ${node.index})"
                         ${isTesting || isConnecting ? 'disabled' : ''}>
@@ -1258,11 +1256,35 @@ class V2RayUI {
     }
 
     // 连接节点
-    async connectNode(subscriptionId, nodeIndex) {
+    async connectNode(subscriptionId, nodeIndex, connectType = null) {
         try {
-            // 获取连接类型
-            const nodeElement = document.querySelector(`[data-index="${nodeIndex}"]`);
-            const connectType = nodeElement?.querySelector('.connect-type')?.value || 'http_random';
+            // 获取连接类型 - 优先使用传入的参数，否则从DOM获取
+            if (!connectType) {
+                const nodeElement = document.querySelector(`[data-index="${nodeIndex}"]`);
+                connectType = nodeElement?.querySelector('.connect-type')?.value || 'http_random';
+            }
+            
+            console.log(`连接节点: 订阅=${subscriptionId}, 索引=${nodeIndex}, 类型=${connectType}`);
+            
+            // 检查固定端口冲突
+            if (connectType === 'http_fixed' || connectType === 'socks_fixed') {
+                console.log(`检查 ${connectType} 端口冲突...`);
+                const hasConflict = await this.checkPortConflict(connectType);
+                console.log(`端口冲突检测结果: ${hasConflict}`);
+                
+                if (hasConflict) {
+                    console.log('发现端口冲突，显示警告...');
+                    const shouldContinue = await this.showPortConflictWarning(connectType);
+                    console.log(`用户选择: ${shouldContinue ? '继续连接' : '取消连接'}`);
+                    
+                    if (!shouldContinue) {
+                        this.showNotification('连接已取消', 'warning');
+                        return; // 用户取消连接
+                    }
+                } else {
+                    console.log('没有端口冲突，继续连接');
+                }
+            }
             
             this.showNotification('正在连接节点...', 'info');
 
@@ -1496,13 +1518,201 @@ class V2RayUI {
 
     // 保存设置
     async saveSettings() {
-        const httpPort = document.getElementById('httpPortSetting')?.value;
-        const socksPort = document.getElementById('socksPortSetting')?.value;
-        const testUrl = document.getElementById('testUrlSetting')?.value;
-
+        const settings = this.collectSettings();
+        
         this.showNotification('正在保存设置...', 'info');
-        await new Promise(resolve => setTimeout(resolve, 500));
-        this.showNotification('设置保存成功', 'success');
+        
+        try {
+            const response = await fetch('/api/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            });
+            
+            if (response.ok) {
+                this.showNotification('设置保存成功', 'success');
+                this.showSettingsStatus('设置已成功保存并生效', 'success');
+            } else {
+                throw new Error('保存失败');
+            }
+        } catch (error) {
+            this.showNotification('设置保存失败: ' + error.message, 'error');
+            this.showSettingsStatus('保存失败: ' + error.message, 'error');
+        }
+    }
+    
+    collectSettings() {
+        return {
+            // 代理设置
+            http_port: parseInt(document.getElementById('httpPortSetting')?.value || 8888),
+            socks_port: parseInt(document.getElementById('socksPortSetting')?.value || 1080),
+            allow_lan: document.getElementById('allowLanSetting')?.checked || false,
+            
+            // 测试设置
+            test_url: document.getElementById('testUrlSetting')?.value || 'https://www.google.com',
+            test_timeout: parseInt(document.getElementById('testTimeoutSetting')?.value || 30),
+            max_concurrent: parseInt(document.getElementById('maxConcurrentSetting')?.value || 3),
+            retry_count: parseInt(document.getElementById('retryCountSetting')?.value || 2),
+            
+            // 订阅设置
+            update_interval: parseInt(document.getElementById('updateIntervalSetting')?.value || 24),
+            user_agent: document.getElementById('userAgentSetting')?.value || 'V2Ray/1.0',
+            auto_test_nodes: document.getElementById('autoTestNewNodesSetting')?.checked || true,
+            
+            // 安全设置
+            enable_logs: document.getElementById('enableLogsSetting')?.checked || true,
+            log_level: document.getElementById('logLevelSetting')?.value || 'info',
+            data_retention: parseInt(document.getElementById('dataRetentionSetting')?.value || 30)
+        };
+    }
+    
+    async loadSettings() {
+        try {
+            const response = await fetch('/api/settings');
+            if (response.ok) {
+                const result = await response.json();
+                // API返回的格式是 {success: true, data: {...}}，需要提取data部分
+                const settings = result.data || result;
+                this.applySettings(settings);
+            }
+        } catch (error) {
+            console.error('加载设置失败:', error);
+        }
+    }
+    
+    applySettings(settings) {
+        // 代理设置
+        if (settings.http_port || settings.httpPort) {
+            const httpPort = settings.http_port || settings.httpPort;
+            document.getElementById('httpPortSetting').value = httpPort;
+        }
+        if (settings.socks_port || settings.socksPort) {
+            const socksPort = settings.socks_port || settings.socksPort;
+            document.getElementById('socksPortSetting').value = socksPort;
+        }
+        const allowLan = 'allow_lan' in settings ? settings.allow_lan : ('allowLan' in settings ? settings.allowLan : false);
+        document.getElementById('allowLanSetting').checked = allowLan;
+        
+        // 测试设置
+        if (settings.test_url || settings.testUrl) {
+            const testUrl = settings.test_url || settings.testUrl;
+            document.getElementById('testUrlSetting').value = testUrl;
+        }
+        if (settings.test_timeout || settings.testTimeout) {
+            const testTimeout = settings.test_timeout || settings.testTimeout;
+            document.getElementById('testTimeoutSetting').value = testTimeout;
+        }
+        if (settings.max_concurrent || settings.maxConcurrent) {
+            const maxConcurrent = settings.max_concurrent || settings.maxConcurrent;
+            document.getElementById('maxConcurrentSetting').value = maxConcurrent;
+        }
+        if (settings.retry_count || settings.retryCount) {
+            const retryCount = settings.retry_count || settings.retryCount;
+            document.getElementById('retryCountSetting').value = retryCount;
+        }
+        
+        // 订阅设置
+        if (settings.update_interval || settings.updateInterval) {
+            const updateInterval = settings.update_interval || settings.updateInterval;
+            document.getElementById('updateIntervalSetting').value = updateInterval;
+        }
+        if (settings.user_agent || settings.userAgent) {
+            const userAgent = settings.user_agent || settings.userAgent;
+            document.getElementById('userAgentSetting').value = userAgent;
+        }
+        const autoTestNewNodes = 'auto_test_nodes' in settings ? settings.auto_test_nodes : ('autoTestNewNodes' in settings ? settings.autoTestNewNodes : true);
+        document.getElementById('autoTestNewNodesSetting').checked = autoTestNewNodes;
+        
+        // 安全设置
+        const enableLogs = 'enable_logs' in settings ? settings.enable_logs : ('enableLogs' in settings ? settings.enableLogs : true);
+        document.getElementById('enableLogsSetting').checked = enableLogs;
+        if (settings.log_level || settings.logLevel) {
+            const logLevel = settings.log_level || settings.logLevel;
+            document.getElementById('logLevelSetting').value = logLevel;
+        }
+        if (settings.data_retention || settings.dataRetention) {
+            const dataRetention = settings.data_retention || settings.dataRetention;
+            document.getElementById('dataRetentionSetting').value = dataRetention;
+        }
+    }
+    
+    async resetSettings() {
+        if (!confirm('确定要重置所有设置为默认值吗？')) {
+            return;
+        }
+        
+        const defaultSettings = {
+            http_port: 8888,
+            socks_port: 1080,
+            allow_lan: false,
+            test_url: 'https://www.google.com',
+            test_timeout: 30,
+            max_concurrent: 3,
+            retry_count: 2,
+            update_interval: 24,
+            user_agent: 'V2Ray/1.0',
+            auto_test_nodes: true,
+            enable_logs: true,
+            log_level: 'info',
+            data_retention: 30
+        };
+        
+        this.applySettings(defaultSettings);
+        this.showNotification('设置已重置为默认值', 'info');
+        this.showSettingsStatus('所有设置已重置为默认值', 'success');
+    }
+    
+    exportSettings() {
+        const settings = this.collectSettings();
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(settings, null, 2));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", "v2ray-manager-settings.json");
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+        
+        this.showNotification('设置已导出', 'success');
+    }
+    
+    importSettings() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const settings = JSON.parse(e.target.result);
+                        this.applySettings(settings);
+                        this.showNotification('设置导入成功', 'success');
+                        this.showSettingsStatus('设置已从文件导入，点击保存设置使其生效', 'success');
+                    } catch (error) {
+                        this.showNotification('导入失败: 文件格式错误', 'error');
+                        this.showSettingsStatus('导入失败: ' + error.message, 'error');
+                    }
+                };
+                reader.readAsText(file);
+            }
+        };
+        input.click();
+    }
+    
+    showSettingsStatus(message, type) {
+        const statusElement = document.getElementById('settingsStatus');
+        if (statusElement) {
+            statusElement.textContent = message;
+            statusElement.className = `settings-status ${type}`;
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                statusElement.className = 'settings-status';
+            }, 3000);
+        }
     }
 
     // 刷新状态
@@ -2043,6 +2253,132 @@ class V2RayUI {
             console.error('停止所有连接失败:', error);
             this.showNotification('停止所有连接失败', 'error');
         }
+    }
+
+    // 检查端口冲突
+    async checkPortConflict(connectType) {
+        try {
+            // 获取系统设置中的固定端口
+            const settings = await this.getSystemSettings();
+            const fixedHTTPPort = settings.httpPort || 8888;
+            const fixedSOCKSPort = settings.socksPort || 1080;
+            
+            let portToCheck = 0;
+            if (connectType === 'http_fixed') {
+                portToCheck = fixedHTTPPort;
+            } else if (connectType === 'socks_fixed') {
+                portToCheck = fixedSOCKSPort;
+            } else {
+                return false; // 随机端口不需要检查冲突
+            }
+            
+            // 使用新的端口冲突检查API
+            const response = await fetch('/api/nodes/check-port-conflict', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    port: portToCheck
+                })
+            });
+            
+            const data = await response.json();
+            if (data.success && data.data) {
+                // 存储冲突信息以便警告对话框使用
+                this.lastPortConflictInfo = data.data;
+                return data.data.has_conflict;
+            }
+            
+            return false; // 没有冲突或检查失败
+        } catch (error) {
+            console.error('检查端口冲突失败:', error);
+            return false; // 发生错误时假设没有冲突
+        }
+    }
+
+    // 获取系统设置
+    async getSystemSettings() {
+        try {
+            const response = await fetch('/api/settings');
+            const data = await response.json();
+            if (data.success) {
+                return data.data || {};
+            }
+            return {};
+        } catch (error) {
+            console.error('获取系统设置失败:', error);
+            return {};
+        }
+    }
+
+    // 显示端口冲突警告
+    async showPortConflictWarning(connectType) {
+        return new Promise((resolve) => {
+            const conflictInfo = this.lastPortConflictInfo || {};
+            const protocolName = conflictInfo.protocol_type || (connectType === 'http_fixed' ? 'HTTP' : 'SOCKS');
+            const conflictNodeName = conflictInfo.conflict_node_name || '未知节点';
+            const conflictPort = conflictInfo.port || '未知端口';
+            
+            // 创建警告弹窗
+            const warningModal = document.createElement('div');
+            warningModal.className = 'modal active';
+            warningModal.innerHTML = `
+                <div class="modal-content" style="max-width: 550px;">
+                    <div class="modal-header">
+                        <h3>⚠️ 端口冲突警告</h3>
+                    </div>
+                    <div class="modal-body">
+                        <div style="padding: 16px; background-color: #fff4ce; border-left: 4px solid #ffb900; margin-bottom: 16px;">
+                            <p style="margin: 0 0 8px 0; font-weight: 600; color: #1f1f1f;">
+                                检测到${protocolName}固定端口 ${conflictPort} 冲突
+                            </p>
+                            <p style="margin: 0; font-size: 14px; color: #1f1f1f;">
+                                当前节点"${conflictNodeName}"已占用${protocolName}固定端口 ${conflictPort}。
+                            </p>
+                            <p style="margin: 8px 0 0 0; font-size: 14px; color: #1f1f1f;">
+                                继续连接将会<strong>自动断开现有连接</strong>并启动新连接。
+                            </p>
+                        </div>
+                        <div style="background-color: #f8f8f8; padding: 12px; border-radius: 4px; margin-bottom: 16px;">
+                            <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #767676;">
+                                💡 建议操作：
+                            </p>
+                            <ul style="margin: 0 0 0 16px; font-size: 13px; color: #767676;">
+                                <li>选择"随机端口"连接方式避免冲突</li>
+                                <li>手动断开现有连接后再连接新节点</li>
+                                <li>或选择"继续连接"自动处理冲突</li>
+                            </ul>
+                        </div>
+                        <div style="padding: 12px; background-color: #fff2f2; border-left: 4px solid #d73527; margin-bottom: 16px;">
+                            <p style="margin: 0; font-size: 14px; color: #1f1f1f; font-weight: 600;">
+                                确认操作：
+                            </p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #1f1f1f;">
+                                是否要继续连接？这将停止节点"${conflictNodeName}"的${protocolName}连接。
+                            </p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="handlePortConflictChoice(false)">
+                            <i class="fas fa-times"></i> 取消连接
+                        </button>
+                        <button class="btn btn-warning" onclick="handlePortConflictChoice(true)">
+                            <i class="fas fa-exclamation-triangle"></i> 继续连接（断开现有）
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // 添加事件处理函数到全局作用域
+            window.handlePortConflictChoice = (shouldContinue) => {
+                document.body.removeChild(warningModal);
+                delete window.handlePortConflictChoice;
+                resolve(shouldContinue);
+            };
+            
+            document.body.appendChild(warningModal);
+        });
     }
 }
 

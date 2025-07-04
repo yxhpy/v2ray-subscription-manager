@@ -15,6 +15,7 @@ import (
 type SubscriptionServiceImpl struct {
 	subscriptionDB *database.SubscriptionDB
 	nodeDB         *database.NodeDB
+	systemService  SystemService  // 添加系统服务依赖
 	mutex          sync.RWMutex
 }
 
@@ -25,6 +26,30 @@ func NewSubscriptionService() SubscriptionService {
 		subscriptionDB: database.NewSubscriptionDB(db),
 		nodeDB:         database.NewNodeDB(db),
 	}
+}
+
+// NewSubscriptionServiceWithSystemService 创建带系统服务的订阅服务
+func NewSubscriptionServiceWithSystemService(systemService SystemService) SubscriptionService {
+	db := database.GetDB()
+	return &SubscriptionServiceImpl{
+		subscriptionDB: database.NewSubscriptionDB(db),
+		nodeDB:         database.NewNodeDB(db),
+		systemService:  systemService,
+	}
+}
+
+// getUserAgent 获取用户代理字符串（从设置中或使用默认值）
+func (s *SubscriptionServiceImpl) getUserAgent() string {
+	if s.systemService == nil {
+		return "V2Ray/1.0"
+	}
+	
+	settings, err := s.systemService.GetSettings()
+	if err != nil || settings.UserAgent == "" {
+		return "V2Ray/1.0"
+	}
+	
+	return settings.UserAgent
 }
 
 // AddSubscription 添加订阅
@@ -83,8 +108,9 @@ func (s *SubscriptionServiceImpl) ParseSubscription(id string) (*models.Subscrip
 		return nil, err
 	}
 
-	// 获取订阅内容
-	content, err := parser.FetchSubscription(subscription.URL)
+	// 获取订阅内容（使用自定义User-Agent）
+	userAgent := s.getUserAgent()
+	content, err := parser.FetchSubscriptionWithUserAgent(subscription.URL, userAgent)
 	if err != nil {
 		return nil, fmt.Errorf("获取订阅失败: %v", err)
 	}

@@ -126,6 +126,16 @@ type ConnectNodeResponse struct {
 	Message   string `json:"message"`
 }
 
+// PortConflictInfo 端口冲突信息
+type PortConflictInfo struct {
+	HasConflict        bool   `json:"has_conflict"`
+	Port               int    `json:"port"`
+	ProtocolType       string `json:"protocol_type"`      // HTTP 或 SOCKS
+	ConflictNodeIndex  int    `json:"conflict_node_index,omitempty"`
+	ConflictNodeName   string `json:"conflict_node_name,omitempty"`
+	SubscriptionID     string `json:"subscription_id,omitempty"`
+}
+
 // BatchTestResponse 批量测试响应
 type BatchTestResponse struct {
 	Results      []*NodeTestResult `json:"results"`
@@ -136,9 +146,26 @@ type BatchTestResponse struct {
 
 // Settings 系统设置
 type Settings struct {
-	HTTPPort  int    `json:"http_port"`
-	SOCKSPort int    `json:"socks_port"`
-	TestURL   string `json:"test_url"`
+	// 代理设置
+	HTTPPort  int  `json:"http_port"`
+	SOCKSPort int  `json:"socks_port"`
+	AllowLan  bool `json:"allow_lan"`
+	
+	// 测试设置
+	TestURL       string `json:"test_url"`
+	TestTimeout   int    `json:"test_timeout"`
+	MaxConcurrent int    `json:"max_concurrent"`
+	RetryCount    int    `json:"retry_count"`
+	
+	// 订阅设置
+	UpdateInterval   int    `json:"update_interval"`
+	UserAgent        string `json:"user_agent"`
+	AutoTestNewNodes bool   `json:"auto_test_new_nodes"`
+	
+	// 安全设置
+	EnableLogs    bool   `json:"enable_logs"`
+	LogLevel      string `json:"log_level"`
+	DataRetention int    `json:"data_retention"`
 }
 
 // ActiveConnection 活跃的代理连接

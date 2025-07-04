@@ -524,3 +524,33 @@ func (h *NodeHandler) CancelBatchTest(w http.ResponseWriter, r *http.Request) {
 
 	h.writeJSONResponse(w, response)
 }
+
+// CheckPortConflict 检查端口冲突
+func (h *NodeHandler) CheckPortConflict(w http.ResponseWriter, r *http.Request) {
+	response := models.NewAPIResponse()
+
+	var req struct {
+		Port int `json:"port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.SetError(err, "请求参数错误")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	if req.Port <= 0 || req.Port > 65535 {
+		response.SetError(fmt.Errorf("端口范围无效"), "端口必须在1-65535之间")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	conflictInfo, err := h.nodeService.CheckPortConflict(req.Port)
+	if err != nil {
+		response.SetError(err, "检查端口冲突失败")
+		h.writeJSONResponse(w, response)
+		return
+	}
+
+	response.SetSuccess(conflictInfo, "端口冲突检查完成")
+	h.writeJSONResponse(w, response)
+}

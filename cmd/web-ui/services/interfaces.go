@@ -48,6 +48,8 @@ type NodeService interface {
 	DeleteNodes(subscriptionID string, nodeIndexes []int) error
 	// 停止所有节点连接
 	StopAllNodeConnections() error
+	// 检查端口冲突
+	CheckPortConflict(port int) (*models.PortConflictInfo, error)
 }
 
 // ProxyService 代理服务接口

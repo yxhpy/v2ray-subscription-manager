@@ -62,12 +62,23 @@ func NewWebUIServer(port string) *WebUIServer {
 
 // initServices 初始化服务层
 func (s *WebUIServer) initServices() {
-	// 创建服务实例
-	s.subscriptionService = services.NewSubscriptionService()
-	s.proxyService = services.NewProxyService()
-	s.nodeService = services.NewNodeService(s.subscriptionService, s.proxyService)
+	// 先创建系统服务
 	s.systemService = services.NewSystemService()
 	s.templateService = services.NewTemplateService("cmd/web-ui/templates")
+	
+	// 创建订阅服务（使用系统设置）
+	s.subscriptionService = services.NewSubscriptionServiceWithSystemService(s.systemService)
+	
+	// 创建代理服务（使用系统设置）
+	s.proxyService = services.NewProxyServiceWithSystemService(s.systemService)
+	
+	// 创建节点服务（传入系统服务以使用设置）
+	s.nodeService = services.NewNodeServiceWithSystemService(s.subscriptionService, s.proxyService, s.systemService)
+	
+	// 设置系统服务的服务依赖（用于设置变更时重启）
+	if systemServiceImpl, ok := s.systemService.(*services.SystemServiceImpl); ok {
+		systemServiceImpl.SetServiceDependencies(s.proxyService, s.nodeService)
+	}
 }
 
 // initHandlers 初始化处理器层
@@ -103,6 +114,7 @@ func (s *WebUIServer) setupRoutes() {
 
 	// API路由 - 最具体的路径先注册
 	http.HandleFunc("/api/status", s.statusHandler.GetStatus)
+	http.HandleFunc("/api/settings", s.handleSettings)
 
 	// 订阅管理API - 更具体的路径先注册
 	http.HandleFunc("/api/subscriptions/parse", s.subscriptionHandler.ParseSubscription)
@@ -119,6 +131,7 @@ func (s *WebUIServer) setupRoutes() {
 	http.HandleFunc("/api/nodes/connect", s.nodeHandler.ConnectNode)
 	http.HandleFunc("/api/nodes/test", s.nodeHandler.TestNode)
 	http.HandleFunc("/api/nodes/speedtest", s.nodeHandler.SpeedTestNode)
+	http.HandleFunc("/api/nodes/check-port-conflict", s.nodeHandler.CheckPortConflict)
 
 	// 代理管理API
 	http.HandleFunc("/api/proxy/status", s.proxyHandler.GetProxyStatus)
@@ -158,6 +171,18 @@ func (s *WebUIServer) handleSubscriptionDetails(w http.ResponseWriter, r *http.R
 	} else {
 		fmt.Printf("DEBUG: Path does not end with /nodes, returning 404\n")
 		http.NotFound(w, r)
+	}
+}
+
+// handleSettings 处理设置请求
+func (s *WebUIServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		s.statusHandler.GetSettings(w, r)
+	case "POST":
+		s.statusHandler.SaveSettings(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 

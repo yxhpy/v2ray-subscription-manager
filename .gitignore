@@ -47,6 +47,13 @@ Thumbs.db
 test_*.json
 test_*.txt
 
+# 临时测试文件
+test_*.html
+*_test.html
+test_conflict*.html
+test_port_conflict*.html
+test_ui_integration.html
+
 # 运行时文件
 *.pid
 
@@ -55,4 +62,8 @@ hysteria2/
 v2ray/
 v2ray-manager
 
+# Web UI 构建产物
+web-ui
+
 *.json
+data/v2ray_manager.db
