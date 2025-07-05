@@ -26,6 +26,7 @@ class V2RayUI {
         this.loadInitialData();
         this.startStatusPolling();
         this.addVisualEnhancements();
+        this.handleURLParams(); // 处理URL参数
     }
 
     // 设置导航
@@ -220,6 +221,21 @@ class V2RayUI {
         await this.loadSubscriptions();
         await this.loadSettings();
         this.showNotification('数据加载完成', 'success');
+    }
+
+    // 处理URL参数
+    handleURLParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const panel = urlParams.get('panel');
+        
+        if (panel && ['dashboard', 'subscriptions', 'nodes', 'proxy', 'settings'].includes(panel)) {
+            // 找到对应的导航项并激活
+            const navItem = document.querySelector(`[data-panel="${panel}"]`);
+            if (navItem) {
+                this.switchPanel(panel);
+                this.updateNavigation(navItem);
+            }
+        }
     }
 
     // 加载面板特定数据
