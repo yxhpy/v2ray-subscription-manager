@@ -59,8 +59,94 @@ class IntelligentProxyManager {
     async loadInitialStatus() {
         try {
             await this.updateStatus();
+            await this.loadLastSavedConfig();
         } catch (error) {
             console.error('加载初始状态失败:', error);
+        }
+    }
+
+    // 加载上次保存的配置
+    async loadLastSavedConfig() {
+        try {
+            console.log('开始加载上次保存的配置...');
+            const response = await fetch('/api/intelligent-proxy/last-config');
+            const result = await response.json();
+            
+            console.log('API响应:', result);
+            
+            if (result.success && result.data && result.data.has_config) {
+                const config = result.data.config;
+                const subscriptionId = result.data.subscription_id;
+                
+                console.log('配置数据:', config);
+                console.log('订阅ID:', subscriptionId);
+                
+                // 填充配置到表单
+                this.fillConfigForm(config);
+                
+                // 如果有订阅ID，尝试选中对应的订阅
+                if (subscriptionId) {
+                    const subscriptionSelect = document.getElementById('subscriptionSelect');
+                    if (subscriptionSelect) {
+                        subscriptionSelect.value = subscriptionId;
+                        console.log('已设置订阅ID:', subscriptionId);
+                    }
+                }
+                
+                console.log('已加载上次保存的智能代理配置');
+            } else {
+                console.log('没有找到保存的配置或配置无效');
+            }
+        } catch (error) {
+            console.error('加载上次保存的配置失败:', error);
+        }
+    }
+
+    // 填充配置到表单
+    fillConfigForm(config) {
+        if (!config) {
+            console.log('配置为空，跳过填充');
+            return;
+        }
+        
+        console.log('开始填充配置到表单:', config);
+        
+        // 填充各个配置项
+        const configFields = {
+            'testConcurrency': config.test_concurrency,
+            'testInterval': config.test_interval,
+            'healthCheckInterval': config.health_check_interval,
+            'testTimeout': config.test_timeout,
+            'testURL': config.test_url,
+            'switchThreshold': config.switch_threshold,
+            'maxQueueSize': config.max_queue_size,
+            'httpPort': config.http_port,
+            'socksPort': config.socks_port
+        };
+        
+        // 填充输入框
+        for (const [fieldId, value] of Object.entries(configFields)) {
+            const element = document.getElementById(fieldId);
+            if (element && value !== undefined && value !== null) {
+                console.log(`设置 ${fieldId} = ${value}`);
+                element.value = value;
+            } else {
+                console.log(`元素 ${fieldId} 不存在或值为空:`, element, value);
+            }
+        }
+        
+        // 填充复选框
+        const checkboxFields = {
+            'enableAutoSwitch': config.enable_auto_switch,
+            'enableRetesting': config.enable_retesting,
+            'enableHealthCheck': config.enable_health_check
+        };
+        
+        for (const [fieldId, value] of Object.entries(checkboxFields)) {
+            const element = document.getElementById(fieldId);
+            if (element && value !== undefined && value !== null) {
+                element.checked = value;
+            }
         }
     }
 
@@ -404,7 +490,8 @@ class IntelligentProxyManager {
 
         this.eventSource.addEventListener('testing_start', (e) => {
             const data = JSON.parse(e.data);
-            this.addEventLog(`开始测试节点，共 ${data.total_nodes} 个节点`, 'info');
+            const mode = data.mode === 'real_time_queue' ? '（实时队列模式）' : '';
+            this.addEventLog(`开始测试节点，共 ${data.total_nodes} 个节点${mode}`, 'info');
         });
 
         this.eventSource.addEventListener('testing_progress', (e) => {
@@ -414,17 +501,33 @@ class IntelligentProxyManager {
 
         this.eventSource.addEventListener('testing_complete', (e) => {
             const data = JSON.parse(e.data);
-            this.addEventLog(`节点测试完成，成功: ${data.success_nodes}，失败: ${data.failed_nodes}`, 'success');
+            const mode = data.mode === 'real_time_queue' ? '（实时队列模式）' : '';
+            this.addEventLog(`节点测试完成${mode}，成功: ${data.success_nodes}，失败: ${data.failed_nodes}`, 'success');
             this.updateStatus(); // 更新状态和队列
+        });
+
+        // 新增：实时队列更新事件
+        this.eventSource.addEventListener('queue_updated', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.is_realtime) {
+                this.addEventLog(`实时队列更新: 新增节点 ${data.new_node.node_name}，队列大小: ${data.queue_size}`, 'info');
+                // 立即更新状态和队列显示
+                this.updateStatus();
+            }
         });
 
         this.eventSource.addEventListener('node_switch', (e) => {
             const data = JSON.parse(e.data);
-            const fromNode = data.from_node ? data.from_node.node_name : '无';
-            const toNode = data.to_node.node_name;
             const reason = this.getSwitchReasonText(data.switch_reason);
-            this.addEventLog(`节点切换: ${fromNode} → ${toNode} (${reason})`, 'warning');
-            this.updateStatus(); // 更新状态显示
+            const fromNode = data.from_node ? data.from_node.node_name : '无';
+            const toNode = data.to_node ? data.to_node.node_name : '无';
+            
+            // 检查是否是实时切换
+            const isRealtime = data.switch_reason && data.switch_reason.includes('realtime');
+            const prefix = isRealtime ? '🚀 实时切换: ' : '切换节点: ';
+            
+            this.addEventLog(`${prefix}从 ${fromNode} 切换到 ${toNode} (${reason})`, 'success');
+            this.updateStatus(); // 更新状态
         });
 
         this.eventSource.addEventListener('queue_update', (e) => {

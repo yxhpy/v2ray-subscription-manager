@@ -164,4 +164,6 @@ type IntelligentProxyService interface {
 	GetTestingProgress() (*models.TestingProgress, error)
 	// 订阅事件流
 	SubscribeEvents() (<-chan *models.IntelligentProxyEvent, error)
+	// 获取上次保存的配置
+	GetLastSavedConfig() (*models.IntelligentProxyConfig, string, error)
 }
