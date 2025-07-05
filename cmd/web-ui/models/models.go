@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/yxhpy/v2ray-subscription-manager/pkg/types"
@@ -277,4 +278,269 @@ func (n *NodeInfo) SetTestResult(result *NodeTestResult) {
 func (n *NodeInfo) SetSpeedResult(result *SpeedTestResult) {
 	n.SpeedResult = result
 	n.LastTest = time.Now()
+}
+
+// SmartConnectionStatus 智能连接状态
+type SmartConnectionStatus struct {
+	IsRunning   bool                    `json:"is_running"`
+	TotalPools  int                     `json:"total_pools"`
+	ActivePools int                     `json:"active_pools"`
+	TotalRules  int                     `json:"total_rules"`
+	ActiveRules int                     `json:"active_rules"`
+	GlobalStats *GlobalConnectionStats `json:"global_stats"`
+	Uptime      int64                   `json:"uptime"`
+	LastUpdate  time.Time               `json:"last_update"`
+}
+
+// GlobalConnectionStats 全局连接统计
+type GlobalConnectionStats struct {
+	TotalConnections   int `json:"total_connections"`
+	ActiveConnections  int `json:"active_connections"`
+	HealthyConnections int `json:"healthy_connections"`
+}
+
+// ConnectionPool 连接池
+type ConnectionPool struct {
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Config      *ConnectionPoolConfig     `json:"config"`
+	Connections []*PoolConnection        `json:"connections"`
+	Status      *ConnectionPoolStatus     `json:"status"`
+	CreateTime  time.Time                 `json:"create_time"`
+	UpdateTime  time.Time                 `json:"update_time"`
+}
+
+// ConnectionPoolConfig 连接池配置
+type ConnectionPoolConfig struct {
+	MaxConnections      int    `json:"max_connections"`
+	MinHealthyNodes     int    `json:"min_healthy_nodes"`
+	LoadBalanceMode     string `json:"load_balance_mode"`
+	HealthCheckInterval int    `json:"health_check_interval"`
+	HealthCheckTimeout  int    `json:"health_check_timeout"`
+	HealthCheckURL      string `json:"health_check_url"`
+	FailoverThreshold   int    `json:"failover_threshold"`
+	RecoveryThreshold   int    `json:"recovery_threshold"`
+	AutoRebalance       bool   `json:"auto_rebalance"`
+	RebalanceInterval   int    `json:"rebalance_interval"`
+}
+
+// ConnectionPoolStatus 连接池状态
+type ConnectionPoolStatus struct {
+	IsRunning         bool      `json:"is_running"`
+	ActiveConnections int       `json:"active_connections"`
+	HealthyNodes      int       `json:"healthy_nodes"`
+	TotalTraffic      int64     `json:"total_traffic"`
+	LastUpdate        time.Time `json:"last_update"`
+}
+
+// PoolConnection 连接池连接
+type PoolConnection struct {
+	ID             string             `json:"id"`
+	SubscriptionID string             `json:"subscription_id"`
+	NodeIndex      int                `json:"node_index"`
+	NodeName       string             `json:"node_name"`
+	Protocol       string             `json:"protocol"`
+	Server         string             `json:"server"`
+	Status         string             `json:"status"`
+	Health         *ConnectionHealth  `json:"health"`
+	Stats          *ConnectionStats   `json:"stats"`
+	Weight         int                `json:"weight"`
+	Priority       int                `json:"priority"`
+	CreateTime     time.Time          `json:"create_time"`
+	LastCheck      time.Time          `json:"last_check"`
+}
+
+// ConnectionHealth 连接健康状态
+type ConnectionHealth struct {
+	IsHealthy         bool      `json:"is_healthy"`
+	Latency           int       `json:"latency"`
+	LastHealthCheck   time.Time `json:"last_health_check"`
+	FailureCount      int       `json:"failure_count"`
+	ConsecutiveErrors int       `json:"consecutive_errors"`
+}
+
+// ConnectionStats 连接统计
+type ConnectionStats struct {
+	TotalRequests   int64     `json:"total_requests"`
+	SuccessRequests int64     `json:"success_requests"`
+	FailedRequests  int64     `json:"failed_requests"`
+	TotalTraffic    int64     `json:"total_traffic"`
+	UploadTraffic   int64     `json:"upload_traffic"`
+	DownloadTraffic int64     `json:"download_traffic"`
+	LastUsed        time.Time `json:"last_used"`
+}
+
+// RoutingRule 路由规则
+type RoutingRule struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	RuleType    string    `json:"rule_type"`
+	Pattern     string    `json:"pattern"`
+	Action      string    `json:"action"`
+	TargetPool  string    `json:"target_pool"`
+	Priority    int       `json:"priority"`
+	Enabled     bool      `json:"enabled"`
+	CreateTime  time.Time `json:"create_time"`
+	UpdateTime  time.Time `json:"update_time"`
+}
+
+// NodeSelection 节点选择
+type NodeSelection struct {
+	SubscriptionID string `json:"subscription_id"`
+	NodeIndex      int    `json:"node_index"`
+	Weight         int    `json:"weight"`
+	Priority       int    `json:"priority"`
+}
+
+// CreateConnectionPoolRequest 创建连接池请求
+type CreateConnectionPoolRequest struct {
+	Name           string           `json:"name"`
+	Description    string           `json:"description"`
+	Config         *ConnectionPoolConfig `json:"config"`
+	NodeSelections []*NodeSelection `json:"node_selections"`
+}
+
+// UpdateConnectionPoolRequest 更新连接池请求
+type UpdateConnectionPoolRequest struct {
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Config      *ConnectionPoolConfig `json:"config"`
+}
+
+// CreateRoutingRuleRequest 创建路由规则请求
+type CreateRoutingRuleRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	RuleType    string `json:"rule_type"`
+	Pattern     string `json:"pattern"`
+	Action      string `json:"action"`
+	TargetPool  string `json:"target_pool"`
+	Priority    int    `json:"priority"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// UpdateRoutingRuleRequest 更新路由规则请求
+type UpdateRoutingRuleRequest struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	RuleType    string `json:"rule_type"`
+	Pattern     string `json:"pattern"`
+	Action      string `json:"action"`
+	TargetPool  string `json:"target_pool"`
+	Priority    int    `json:"priority"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// NewConnectionPool 创建新连接池
+func NewConnectionPool(name, description string, config *ConnectionPoolConfig) *ConnectionPool {
+	return &ConnectionPool{
+		ID:          fmt.Sprintf("%d", time.Now().UnixNano()),
+		Name:        name,
+		Description: description,
+		Config:      config,
+		Connections: []*PoolConnection{},
+		Status: &ConnectionPoolStatus{
+			IsRunning:         false,
+			ActiveConnections: 0,
+			HealthyNodes:      0,
+			TotalTraffic:      0,
+			LastUpdate:        time.Now(),
+		},
+		CreateTime: time.Now(),
+		UpdateTime: time.Now(),
+	}
+}
+
+// NewRoutingRule 创建新路由规则
+func NewRoutingRule(name, description, ruleType, pattern, action, targetPool string, priority int, enabled bool) *RoutingRule {
+	return &RoutingRule{
+		ID:          fmt.Sprintf("%d", time.Now().UnixNano()),
+		Name:        name,
+		Description: description,
+		RuleType:    ruleType,
+		Pattern:     pattern,
+		Action:      action,
+		TargetPool:  targetPool,
+		Priority:    priority,
+		Enabled:     enabled,
+		CreateTime:  time.Now(),
+		UpdateTime:  time.Now(),
+	}
+}
+
+// StartAutoProxyRequest 启动自动代理请求
+type StartAutoProxyRequest struct {
+	SubscriptionID string `json:"subscription_id"`
+	Mode           string `json:"mode"` // failover, load_balance, smart
+	Config         *AutoProxyConfig `json:"config"`
+}
+
+// UpdateAutoProxyConfigRequest 更新自动代理配置请求
+type UpdateAutoProxyConfigRequest struct {
+	Config *AutoProxyConfig `json:"config"`
+}
+
+// AutoProxyConfig 自动代理配置
+type AutoProxyConfig struct {
+	TestInterval     int    `json:"test_interval"`     // 测试间隔（秒）
+	HealthThreshold  int    `json:"health_threshold"`  // 健康阈值
+	FailoverTimeout  int    `json:"failover_timeout"`  // 故障转移超时
+	MaxRetries       int    `json:"max_retries"`       // 最大重试次数
+	TestURL          string `json:"test_url"`          // 测试URL
+	TestTimeout      int    `json:"test_timeout"`      // 测试超时
+	SmartSwitching   bool   `json:"smart_switching"`   // 智能切换
+	LoadBalanceMode  string `json:"load_balance_mode"` // 负载均衡模式
+}
+
+// AutoProxyStatus 自动代理状态
+type AutoProxyStatus struct {
+	IsRunning       bool                `json:"is_running"`
+	Mode            string              `json:"mode"`
+	CurrentNode     *NodeInfo           `json:"current_node"`
+	AvailableNodes  []*NodeInfo         `json:"available_nodes"`
+	FailedNodes     []*NodeInfo         `json:"failed_nodes"`
+	TotalSwitches   int                 `json:"total_switches"`
+	LastSwitchTime  time.Time           `json:"last_switch_time"`
+	HealthStats     *AutoProxyHealthStats `json:"health_stats"`
+	StartTime       time.Time           `json:"start_time"`
+	Uptime          int64               `json:"uptime"`
+	LastUpdate      time.Time           `json:"last_update"`
+}
+
+// AutoProxyHealthStats 自动代理健康统计
+type AutoProxyHealthStats struct {
+	TotalTests     int     `json:"total_tests"`
+	SuccessTests   int     `json:"success_tests"`
+	FailedTests    int     `json:"failed_tests"`
+	SuccessRate    float64 `json:"success_rate"`
+	AverageLatency int     `json:"average_latency"`
+	LastTestTime   time.Time `json:"last_test_time"`
+}
+
+// NodePerformanceRecord 节点性能记录
+type NodePerformanceRecord struct {
+	NodeName       string    `json:"node_name"`
+	Latency        int       `json:"latency"`
+	DownloadSpeed  int64     `json:"download_speed"`
+	UploadSpeed    int64     `json:"upload_speed"`
+	SuccessRate    float64   `json:"success_rate"`
+	Timestamp      time.Time `json:"timestamp"`
+	TestCount      int       `json:"test_count"`
+	FailCount      int       `json:"fail_count"`
+}
+
+// FailoverRecord 故障转移记录
+type FailoverRecord struct {
+	ID             string    `json:"id"`
+	FromNode       string    `json:"from_node"`
+	ToNode         string    `json:"to_node"`
+	FailureReason  string    `json:"failure_reason"`
+	SwitchTime     time.Time `json:"switch_time"`
+	RecoveryTime   time.Time `json:"recovery_time"`
+	DowntimeDuration int64   `json:"downtime_duration"`
+	TriggerType    string    `json:"trigger_type"`
 }

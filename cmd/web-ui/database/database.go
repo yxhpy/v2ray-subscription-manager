@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/yxhpy/v2ray-subscription-manager/cmd/web-ui/models"
 )
 
 // Database 数据库管理器
@@ -279,5 +280,87 @@ func CloseGlobalDB() error {
 		}
 		return err
 	}
+	return nil
+}
+
+// SmartConnectionDB 智能连接数据库管理器
+type SmartConnectionDB struct {
+	DB *Database
+}
+
+// NewSmartConnectionDB 创建智能连接数据库管理器
+func NewSmartConnectionDB(db *Database) *SmartConnectionDB {
+	return &SmartConnectionDB{
+		DB: db,
+	}
+}
+
+// GetAllConnectionPools 获取所有连接池
+func (s *SmartConnectionDB) GetAllConnectionPools() ([]*models.ConnectionPool, error) {
+	// 这里应该从数据库查询连接池
+	// 暂时返回空列表
+	return []*models.ConnectionPool{}, nil
+}
+
+// GetAllRoutingRules 获取所有路由规则
+func (s *SmartConnectionDB) GetAllRoutingRules() ([]*models.RoutingRule, error) {
+	// 这里应该从数据库查询路由规则
+	// 暂时返回空列表
+	return []*models.RoutingRule{}, nil
+}
+
+// CreateConnectionPool 创建连接池
+func (s *SmartConnectionDB) CreateConnectionPool(pool *models.ConnectionPool) error {
+	// 这里应该实现数据库插入逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// CreatePoolConnection 创建连接池连接
+func (s *SmartConnectionDB) CreatePoolConnection(poolID string, connection *models.PoolConnection) error {
+	// 这里应该实现数据库插入逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// UpdateConnectionPool 更新连接池
+func (s *SmartConnectionDB) UpdateConnectionPool(pool *models.ConnectionPool) error {
+	// 这里应该实现数据库更新逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// DeleteConnectionPool 删除连接池
+func (s *SmartConnectionDB) DeleteConnectionPool(id string) error {
+	// 这里应该实现数据库删除逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// CreateRoutingRule 创建路由规则
+func (s *SmartConnectionDB) CreateRoutingRule(rule *models.RoutingRule) error {
+	// 这里应该实现数据库插入逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// UpdateRoutingRule 更新路由规则
+func (s *SmartConnectionDB) UpdateRoutingRule(rule *models.RoutingRule) error {
+	// 这里应该实现数据库更新逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// DeleteRoutingRule 删除路由规则
+func (s *SmartConnectionDB) DeleteRoutingRule(id string) error {
+	// 这里应该实现数据库删除逻辑
+	// 暂时返回nil
+	return nil
+}
+
+// UpdatePoolConnection 更新连接池连接
+func (s *SmartConnectionDB) UpdatePoolConnection(connection *models.PoolConnection) error {
+	// 这里应该实现数据库更新逻辑
+	// 暂时返回nil
 	return nil
 }

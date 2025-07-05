@@ -87,3 +87,57 @@ type TemplateService interface {
 	// 渲染主页
 	RenderIndex() (string, error)
 }
+
+// AutoProxyService 自动代理服务接口
+type AutoProxyService interface {
+	// 启动自动代理
+	StartAutoProxy(req *models.StartAutoProxyRequest) error
+	// 停止自动代理
+	StopAutoProxy() error
+	// 获取自动代理状态
+	GetAutoProxyStatus() (*models.AutoProxyStatus, error)
+	// 更新自动代理配置
+	UpdateAutoProxyConfig(req *models.UpdateAutoProxyConfigRequest) error
+	// 获取自动代理配置
+	GetAutoProxyConfig() (*models.AutoProxyConfig, error)
+	// 获取最佳节点
+	GetBestNode() (*models.NodeInfo, error)
+	// 获取节点性能历史
+	GetNodePerformanceHistory(subscriptionID string, nodeIndex int) ([]*models.NodePerformanceRecord, error)
+	// 切换到最佳节点
+	SwitchToBestNode() error
+	// 获取故障转移记录
+	GetFailoverRecords() ([]*models.FailoverRecord, error)
+}
+
+// SmartConnectionService 智能连接服务接口
+type SmartConnectionService interface {
+	// 启动智能连接管理器
+	Start() error
+	// 停止智能连接管理器
+	Stop() error
+	// 获取智能连接状态
+	GetStatus() (*models.SmartConnectionStatus, error)
+	// 创建连接池
+	CreateConnectionPool(req *models.CreateConnectionPoolRequest) (*models.ConnectionPool, error)
+	// 获取所有连接池
+	GetAllConnectionPools() ([]*models.ConnectionPool, error)
+	// 根据ID获取连接池
+	GetConnectionPoolByID(id string) (*models.ConnectionPool, error)
+	// 更新连接池
+	UpdateConnectionPool(req *models.UpdateConnectionPoolRequest) error
+	// 删除连接池
+	DeleteConnectionPool(id string) error
+	// 启动连接池
+	StartConnectionPool(id string) error
+	// 停止连接池
+	StopConnectionPool(id string) error
+	// 创建路由规则
+	CreateRoutingRule(req *models.CreateRoutingRuleRequest) (*models.RoutingRule, error)
+	// 获取所有路由规则
+	GetAllRoutingRules() ([]*models.RoutingRule, error)
+	// 更新路由规则
+	UpdateRoutingRule(req *models.UpdateRoutingRuleRequest) error
+	// 删除路由规则
+	DeleteRoutingRule(id string) error
+}
