@@ -140,12 +140,99 @@ func (d *Database) initTables() error {
 		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	// 智能代理配置表
+	intelligentProxyConfigTable := `
+	CREATE TABLE IF NOT EXISTS intelligent_proxy_config (
+		id INTEGER PRIMARY KEY CHECK (id = 1), -- 确保只有一行
+		subscription_id TEXT NOT NULL,
+		test_concurrency INTEGER DEFAULT 10,
+		test_interval INTEGER DEFAULT 30,
+		health_check_interval INTEGER DEFAULT 60,
+		test_timeout INTEGER DEFAULT 30,
+		test_url TEXT DEFAULT 'https://www.google.com',
+		switch_threshold INTEGER DEFAULT 100,
+		max_queue_size INTEGER DEFAULT 50,
+		http_port INTEGER DEFAULT 7890,
+		socks_port INTEGER DEFAULT 7891,
+		enable_auto_switch BOOLEAN DEFAULT TRUE,
+		enable_retesting BOOLEAN DEFAULT TRUE,
+		enable_health_check BOOLEAN DEFAULT TRUE,
+		is_running BOOLEAN DEFAULT FALSE,
+		start_time TEXT DEFAULT '',
+		last_update TEXT DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	// 智能代理队列表
+	intelligentProxyQueueTable := `
+	CREATE TABLE IF NOT EXISTS intelligent_proxy_queue (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		subscription_id TEXT NOT NULL,
+		node_index INTEGER NOT NULL,
+		node_name TEXT NOT NULL,
+		protocol TEXT NOT NULL,
+		server TEXT NOT NULL,
+		port TEXT NOT NULL,
+		latency INTEGER DEFAULT 0,
+		speed REAL DEFAULT 0.0,
+		score REAL DEFAULT 0.0,
+		last_test_time TEXT DEFAULT '',
+		test_count INTEGER DEFAULT 0,
+		fail_count INTEGER DEFAULT 0,
+		success_rate REAL DEFAULT 0.0,
+		is_active BOOLEAN DEFAULT FALSE,
+		status TEXT DEFAULT 'queued',
+		priority INTEGER DEFAULT 0,
+		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+		UNIQUE(subscription_id, node_index)
+	);`
+
+	// 智能代理测试历史表
+	intelligentProxyTestHistoryTable := `
+	CREATE TABLE IF NOT EXISTS intelligent_proxy_test_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		subscription_id TEXT NOT NULL,
+		node_index INTEGER NOT NULL,
+		node_name TEXT NOT NULL,
+		success BOOLEAN NOT NULL,
+		latency INTEGER DEFAULT 0,
+		speed REAL DEFAULT 0.0,
+		error_message TEXT DEFAULT '',
+		test_time TEXT NOT NULL,
+		test_duration INTEGER DEFAULT 0,
+		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+	);`
+
+	// 智能代理切换记录表
+	intelligentProxySwitchLogTable := `
+	CREATE TABLE IF NOT EXISTS intelligent_proxy_switch_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		from_node_index INTEGER DEFAULT -1,
+		from_node_name TEXT DEFAULT '',
+		to_node_index INTEGER NOT NULL,
+		to_node_name TEXT NOT NULL,
+		switch_reason TEXT NOT NULL,
+		switch_time TEXT NOT NULL,
+		latency_before INTEGER DEFAULT 0,
+		latency_after INTEGER DEFAULT 0,
+		created_at TEXT DEFAULT CURRENT_TIMESTAMP
+	);`
+
 	// 创建索引
 	indexes := []string{
 		"CREATE INDEX IF NOT EXISTS idx_nodes_subscription_id ON nodes(subscription_id);",
 		"CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);",
 		"CREATE INDEX IF NOT EXISTS idx_test_results_node_id ON test_results(node_id);",
 		"CREATE INDEX IF NOT EXISTS idx_test_results_test_type ON test_results(test_type);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_queue_subscription_id ON intelligent_proxy_queue(subscription_id);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_queue_status ON intelligent_proxy_queue(status);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_queue_score ON intelligent_proxy_queue(score DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_test_history_subscription_id ON intelligent_proxy_test_history(subscription_id);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_test_history_test_time ON intelligent_proxy_test_history(test_time);",
+		"CREATE INDEX IF NOT EXISTS idx_intelligent_proxy_switch_log_switch_time ON intelligent_proxy_switch_log(switch_time);",
 	}
 
 	// 执行表创建
@@ -155,6 +242,10 @@ func (d *Database) initTables() error {
 		testResultsTable,
 		proxyStatusTable,
 		settingsTable,
+		intelligentProxyConfigTable,
+		intelligentProxyQueueTable,
+		intelligentProxyTestHistoryTable,
+		intelligentProxySwitchLogTable,
 	}
 
 	for _, table := range tables {

@@ -21,6 +21,12 @@ func CleanupTempFiles() {
 		"temp_config_*.json",
 		"test_proxy_*.json",
 
+		// 智能代理测试文件
+		"temp_config_test_*.json",
+		"intelligent_proxy_config_*.json",
+		"intelligent_proxy_test_*.json",
+		"intelligent_proxy_*.json",
+
 		// 通用临时文件
 		"*.tmp",
 		"*.temp",
@@ -102,11 +108,13 @@ func CleanupHysteria2TempFiles() {
 		"./hysteria2/config_*.yaml",
 		"./hysteria2/test_proxy_*.yaml",
 		"./hysteria2/proxy_server_*.yaml",
+		"./hysteria2/intelligent_proxy_*.yaml",
 		"hysteria2/test_config_*.yaml", // 无./前缀的版本
 		"hysteria2/temp_*.yaml",
 		"hysteria2/config_*.yaml",
 		"hysteria2/test_proxy_*.yaml",
 		"hysteria2/proxy_server_*.yaml",
+		"hysteria2/intelligent_proxy_*.yaml",
 	}
 
 	cleanedCount := 0

@@ -544,3 +544,104 @@ type FailoverRecord struct {
 	DowntimeDuration int64   `json:"downtime_duration"`
 	TriggerType    string    `json:"trigger_type"`
 }
+
+// IntelligentProxyRequest 智能代理请求
+type IntelligentProxyRequest struct {
+	SubscriptionID string                  `json:"subscription_id"`
+	Config         *IntelligentProxyConfig `json:"config"`
+}
+
+// IntelligentProxyConfig 智能代理配置
+type IntelligentProxyConfig struct {
+	TestConcurrency      int    `json:"test_concurrency"`      // 测试并发数
+	TestInterval         int    `json:"test_interval"`         // 定时重测间隔（分钟）
+	HealthCheckInterval  int    `json:"health_check_interval"` // 健康检查间隔（秒）
+	TestTimeout          int    `json:"test_timeout"`          // 测试超时（秒）
+	TestURL              string `json:"test_url"`              // 测试URL
+	SwitchThreshold      int    `json:"switch_threshold"`      // 切换阈值（延迟差异ms）
+	MaxQueueSize         int    `json:"max_queue_size"`        // 队列最大大小
+	HTTPPort             int    `json:"http_port"`             // HTTP代理端口
+	SOCKSPort            int    `json:"socks_port"`            // SOCKS代理端口
+	EnableAutoSwitch     bool   `json:"enable_auto_switch"`    // 启用自动切换
+	EnableRetesting      bool   `json:"enable_retesting"`      // 启用定时重测
+	EnableHealthCheck    bool   `json:"enable_health_check"`   // 启用健康检查
+}
+
+// IntelligentProxyStatus 智能代理状态
+type IntelligentProxyStatus struct {
+	IsRunning           bool                     `json:"is_running"`
+	SubscriptionID      string                   `json:"subscription_id"`
+	SubscriptionName    string                   `json:"subscription_name"`
+	ActiveNode          *QueuedNode              `json:"active_node"`
+	Queue               []*QueuedNode            `json:"queue"`
+	QueueSize           int                      `json:"queue_size"`
+	TestedNodes         int                      `json:"tested_nodes"`
+	FailedNodes         int                      `json:"failed_nodes"`
+	TotalSwitches       int                      `json:"total_switches"`
+	LastSwitchTime      time.Time                `json:"last_switch_time"`
+	LastTestTime        time.Time                `json:"last_test_time"`
+	TestingProgress     *TestingProgress         `json:"testing_progress"`
+	Config              *IntelligentProxyConfig  `json:"config"`
+	HTTPPort            int                      `json:"http_port"`
+	SOCKSPort           int                      `json:"socks_port"`
+	StartTime           time.Time                `json:"start_time"`
+	Uptime              int64                    `json:"uptime"`
+	LastUpdate          time.Time                `json:"last_update"`
+}
+
+// QueuedNode 队列中的节点
+type QueuedNode struct {
+	SubscriptionID string    `json:"subscription_id"`
+	NodeIndex      int       `json:"node_index"`
+	NodeName       string    `json:"node_name"`
+	Protocol       string    `json:"protocol"`
+	Server         string    `json:"server"`
+	Port           string    `json:"port"`
+	Latency        int64     `json:"latency"`        // 延迟（毫秒）
+	Speed          float64   `json:"speed"`          // 速度（Mbps）
+	Score          float64   `json:"score"`          // 综合评分
+	LastTestTime   time.Time `json:"last_test_time"`
+	TestCount      int       `json:"test_count"`
+	FailCount      int       `json:"fail_count"`
+	SuccessRate    float64   `json:"success_rate"`
+	IsActive       bool      `json:"is_active"`      // 是否为当前激活节点
+	Status         string    `json:"status"`         // 状态：testing, queued, active, failed
+}
+
+// TestingProgress 测试进度
+type TestingProgress struct {
+	IsRunning     bool      `json:"is_running"`
+	TotalNodes    int       `json:"total_nodes"`
+	TestedNodes   int       `json:"tested_nodes"`
+	SuccessNodes  int       `json:"success_nodes"`
+	FailedNodes   int       `json:"failed_nodes"`
+	CurrentNode   string    `json:"current_node"`
+	Progress      int       `json:"progress"`      // 百分比
+	StartTime     time.Time `json:"start_time"`
+	EstimatedTime int       `json:"estimated_time"` // 预计剩余时间（秒）
+}
+
+// NodeSpeedTestResult 节点速度测试结果
+type NodeSpeedTestResult struct {
+	SubscriptionID string    `json:"subscription_id"`
+	NodeIndex      int       `json:"node_index"`
+	NodeName       string    `json:"node_name"`
+	Success        bool      `json:"success"`
+	Latency        int64     `json:"latency"`        // 延迟（毫秒）
+	Speed          float64   `json:"speed"`          // 速度（Mbps）
+	Error          string    `json:"error"`          // 错误信息
+	TestTime       time.Time `json:"test_time"`
+	TestDuration   int64     `json:"test_duration"`  // 测试耗时（毫秒）
+}
+
+// IntelligentProxyEvent 智能代理事件
+type IntelligentProxyEvent struct {
+	Type      string      `json:"type"`      // 事件类型：testing_start, testing_progress, testing_complete, node_switch, queue_update
+	Data      interface{} `json:"data"`      // 事件数据
+	Timestamp time.Time   `json:"timestamp"`
+}
+
+// SwitchNodeRequest 切换节点请求
+type SwitchNodeRequest struct {
+	NodeIndex int `json:"node_index"` // 要切换到的节点索引（队列中的位置）
+}

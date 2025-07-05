@@ -141,3 +141,27 @@ type SmartConnectionService interface {
 	// 删除路由规则
 	DeleteRoutingRule(id string) error
 }
+
+// IntelligentProxyService 智能代理服务接口
+type IntelligentProxyService interface {
+	// 启动智能代理
+	StartIntelligentProxy(req *models.IntelligentProxyRequest) error
+	// 停止智能代理
+	StopIntelligentProxy() error
+	// 获取智能代理状态
+	GetIntelligentProxyStatus() (*models.IntelligentProxyStatus, error)
+	// 手动切换节点
+	SwitchToNode(req *models.SwitchNodeRequest) error
+	// 获取队列状态
+	GetQueue() ([]*models.QueuedNode, error)
+	// 强制重新测试所有节点
+	ForceRetestAllNodes() error
+	// 暂停/恢复自动切换
+	ToggleAutoSwitch(enabled bool) error
+	// 更新配置
+	UpdateConfig(config *models.IntelligentProxyConfig) error
+	// 获取测试进度
+	GetTestingProgress() (*models.TestingProgress, error)
+	// 订阅事件流
+	SubscribeEvents() (<-chan *models.IntelligentProxyEvent, error)
+}

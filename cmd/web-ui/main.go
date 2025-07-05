@@ -20,17 +20,20 @@ import (
 // WebUIServer Web UI服务器
 type WebUIServer struct {
 	// 服务层
-	subscriptionService services.SubscriptionService
-	nodeService         services.NodeService
-	proxyService        services.ProxyService
-	systemService       services.SystemService
-	templateService     services.TemplateService
+	subscriptionService     services.SubscriptionService
+	nodeService            services.NodeService
+	proxyService           services.ProxyService
+	systemService          services.SystemService
+	templateService        services.TemplateService
+	intelligentProxyService services.IntelligentProxyService
 
 	// 处理器层
-	subscriptionHandler *handlers.SubscriptionHandler
-	nodeHandler         *handlers.NodeHandler
-	proxyHandler        *handlers.ProxyHandler
-	statusHandler       *handlers.StatusHandler
+	subscriptionHandler      *handlers.SubscriptionHandler
+	nodeHandler             *handlers.NodeHandler
+	proxyHandler            *handlers.ProxyHandler
+	statusHandler           *handlers.StatusHandler
+	intelligentProxyHandler *handlers.IntelligentProxyHandler
+	intelligentProxyPageHandler *handlers.IntelligentProxyPageHandler
 
 	// 服务器配置
 	port       string
@@ -75,6 +78,9 @@ func (s *WebUIServer) initServices() {
 	// 创建节点服务（传入系统服务以使用设置）
 	s.nodeService = services.NewNodeServiceWithSystemService(s.subscriptionService, s.proxyService, s.systemService)
 	
+	// 创建智能代理服务
+	s.intelligentProxyService = services.NewIntelligentProxyService(database.GetDB(), s.subscriptionService, s.proxyService)
+	
 	// 设置系统服务的服务依赖（用于设置变更时重启）
 	if systemServiceImpl, ok := s.systemService.(*services.SystemServiceImpl); ok {
 		systemServiceImpl.SetServiceDependencies(s.proxyService, s.nodeService)
@@ -87,6 +93,8 @@ func (s *WebUIServer) initHandlers() {
 	s.nodeHandler = handlers.NewNodeHandler(s.nodeService)
 	s.proxyHandler = handlers.NewProxyHandler(s.proxyService, s.nodeService)
 	s.statusHandler = handlers.NewStatusHandler(s.systemService)
+	s.intelligentProxyHandler = handlers.NewIntelligentProxyHandler(s.intelligentProxyService)
+	s.intelligentProxyPageHandler = handlers.NewIntelligentProxyPageHandler(s.subscriptionService)
 }
 
 // setupRoutes 设置路由
@@ -138,6 +146,12 @@ func (s *WebUIServer) setupRoutes() {
 	http.HandleFunc("/api/proxy/stop", s.proxyHandler.StopProxy)
 	http.HandleFunc("/api/proxy/connections", s.proxyHandler.GetActiveConnections)
 	http.HandleFunc("/api/proxy/stop-all", s.proxyHandler.StopAllConnections)
+
+	// 智能代理API - 注册智能代理路由
+	s.intelligentProxyHandler.RegisterRoutes(http.DefaultServeMux)
+	
+	// 智能代理页面
+	s.intelligentProxyPageHandler.RegisterPageRoutes(http.DefaultServeMux)
 
 	// 主页 - 最后注册catch-all路由
 	http.HandleFunc("/", s.statusHandler.RenderIndex)
@@ -218,6 +232,14 @@ func (s *WebUIServer) Shutdown(ctx context.Context) error {
 // cleanup 清理所有资源
 func (s *WebUIServer) cleanup() {
 	fmt.Printf("🧹 正在清理系统资源...\n")
+	
+	// 停止智能代理服务
+	if s.intelligentProxyService != nil {
+		fmt.Printf("🤖 停止智能代理服务...\n")
+		if err := s.intelligentProxyService.StopIntelligentProxy(); err != nil {
+			fmt.Printf("⚠️ 停止智能代理服务失败: %v\n", err)
+		}
+	}
 	
 	// 停止所有活跃的代理连接
 	if s.proxyService != nil {
@@ -404,6 +426,33 @@ func (s *WebUIServer) cleanupDatabaseStatus() {
 		fmt.Printf("❌ 重置代理状态失败: %v\n", err)
 	} else {
 		fmt.Printf("✅ 代理运行状态已重置\n")
+	}
+	
+	// 重置智能代理状态
+	resetIntelligentProxySQL := `
+	UPDATE intelligent_proxy_config 
+	SET is_running = FALSE,
+	    last_update = CURRENT_TIMESTAMP
+	WHERE id = 1;`
+	
+	if _, err := db.DB.Exec(resetIntelligentProxySQL); err != nil {
+		fmt.Printf("❌ 重置智能代理状态失败: %v\n", err)
+	} else {
+		fmt.Printf("✅ 智能代理运行状态已重置\n")
+	}
+	
+	// 清理智能代理队列中的激活状态
+	resetQueueSQL := `
+	UPDATE intelligent_proxy_queue 
+	SET is_active = FALSE,
+	    status = 'queued',
+	    updated_at = CURRENT_TIMESTAMP
+	WHERE is_active = TRUE;`
+	
+	if _, err := db.DB.Exec(resetQueueSQL); err != nil {
+		fmt.Printf("❌ 重置智能代理队列状态失败: %v\n", err)
+	} else {
+		fmt.Printf("✅ 智能代理队列状态已重置\n")
 	}
 }
 
