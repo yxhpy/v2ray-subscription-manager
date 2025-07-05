@@ -130,6 +130,12 @@ class IntelligentProxyManager {
 
     // 从表单获取配置
     getConfigFromForm() {
+        // 获取队列大小配置，确保不为0或负数
+        let maxQueueSize = parseInt(document.getElementById('maxQueueSize')?.value) || 50;
+        if (maxQueueSize <= 0) {
+            maxQueueSize = 50; // 确保使用合理的默认值
+        }
+        
         return {
             test_concurrency: parseInt(document.getElementById('testConcurrency').value) || 10,
             test_interval: parseInt(document.getElementById('testInterval').value) || 30,
@@ -137,7 +143,7 @@ class IntelligentProxyManager {
             test_timeout: parseInt(document.getElementById('testTimeout').value) || 30,
             test_url: document.getElementById('testURL').value || 'https://www.google.com',
             switch_threshold: parseInt(document.getElementById('switchThreshold').value) || 100,
-            max_queue_size: 50,
+            max_queue_size: maxQueueSize,
             http_port: parseInt(document.getElementById('httpPort').value) || 7890,
             socks_port: parseInt(document.getElementById('socksPort').value) || 7891,
             enable_auto_switch: document.getElementById('enableAutoSwitch').checked,

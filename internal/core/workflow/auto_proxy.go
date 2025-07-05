@@ -53,7 +53,7 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 	testerCtx, testerCancel := context.WithCancel(ctx)
 	serverCtx, serverCancel := context.WithCancel(ctx)
 
-	// 设置默认值 - 针对Windows进行优化
+	// 设置默认值 - 针对Windows进行优化并增加稳定性
 	if config.HTTPPort == 0 {
 		config.HTTPPort = 7890
 	}
@@ -61,31 +61,27 @@ func NewAutoProxyManager(config types.AutoProxyConfig) *AutoProxyManager {
 		config.SOCKSPort = 7891
 	}
 	if config.UpdateInterval == 0 {
-		config.UpdateInterval = 10 * time.Minute
+		config.UpdateInterval = 30 * time.Minute // 增加默认更新间隔，减少频繁测试
 	}
 	if config.TestConcurrency == 0 {
-		// Windows环境使用更保守的并发数
+		// 所有环境使用更保守的并发数，提高稳定性
 		if runtime.GOOS == "windows" {
-			config.TestConcurrency = 3 // Windows下降低并发数
+			config.TestConcurrency = 2 // Windows下进一步降低并发数
 		} else {
-			config.TestConcurrency = 20
+			config.TestConcurrency = 3 // 其他系统也降低并发数
 		}
 	}
 	if config.TestTimeout == 0 {
-		// Windows环境使用更长的超时时间
+		// 所有环境使用更长的超时时间，提高成功率
 		if runtime.GOOS == "windows" {
-			config.TestTimeout = 60 * time.Second // Windows下增加超时时间
+			config.TestTimeout = 90 * time.Second // Windows下增加超时时间
 		} else {
-			config.TestTimeout = 30 * time.Second
+			config.TestTimeout = 60 * time.Second // 其他系统也增加超时时间
 		}
 	}
 	if config.TestURL == "" {
-		// Windows环境优先使用国内可访问的URL
-		if runtime.GOOS == "windows" {
-			config.TestURL = "http://www.baidu.com" // Windows下优先使用百度
-		} else {
-			config.TestURL = "http://www.google.com"
-		}
+		// 优先使用国内可访问的URL，提高测试成功率
+		config.TestURL = "http://www.baidu.com" // 所有环境优先使用百度
 	}
 	if config.MinPassingNodes == 0 {
 		config.MinPassingNodes = 5
@@ -233,7 +229,7 @@ func (m *AutoProxyManager) runProxyServerProcess() {
 
 // monitorProcesses 监控进程状态
 func (m *AutoProxyManager) monitorProcesses() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second) // 增加监控间隔，减少频繁检查
 	defer ticker.Stop()
 
 	for {

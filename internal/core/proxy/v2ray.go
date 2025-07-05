@@ -214,27 +214,41 @@ func generateV2RayConfig(node *types.Node, httpPort, socksPort int) (map[string]
 				"tag":      "http",
 				"port":     httpPort,
 				"protocol": "http",
+				"listen":   "0.0.0.0",
 				"settings": map[string]interface{}{
 					"allowTransparent": false,
+					"timeout":         300,
+				},
+				"sockopt": map[string]interface{}{
+					"tcpKeepAlive": true,
+					"reusePort":    true,
 				},
 			},
 			{
 				"tag":      "socks",
 				"port":     socksPort,
 				"protocol": "socks",
+				"listen":   "0.0.0.0",
 				"settings": map[string]interface{}{
 					"auth": "noauth",
 					"udp":  true,
+					// 关键修复：移除限制性的IP参数，确保可以接受局域网连接
+				},
+				"sockopt": map[string]interface{}{
+					"tcpKeepAlive": true,
+					"reusePort":    true,
 				},
 			},
 		},
 		"routing": map[string]interface{}{
+			"domainStrategy": "IPOnDemand",
 			"rules": []map[string]interface{}{
 				{
 					"type":        "field",
 					"inboundTag":  []string{"http", "socks"},
 					"outboundTag": "proxy",
 				},
+				// 允许局域网访问，不阻止私有IP段
 			},
 		},
 		"outbounds": []map[string]interface{}{},
