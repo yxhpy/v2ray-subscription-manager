@@ -34,10 +34,15 @@ class V2RayUI {
         const navItems = document.querySelectorAll('.nav-item');
         navItems.forEach(item => {
             item.addEventListener('click', (e) => {
-                e.preventDefault();
                 const panel = item.getAttribute('data-panel');
-                this.switchPanel(panel);
-                this.updateNavigation(item);
+                
+                // 只有具有data-panel属性的菜单项才阻止默认行为并切换面板
+                if (panel) {
+                    e.preventDefault();
+                    this.switchPanel(panel);
+                    this.updateNavigation(item);
+                }
+                // 没有data-panel属性的菜单项（如智能代理）允许默认的链接导航行为
             });
         });
     }

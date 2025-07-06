@@ -12,6 +12,18 @@ if ! command -v go &> /dev/null; then
     exit 1
 fi
 
+# 获取版本信息
+VERSION=${1:-"dev"}
+BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# 构建标志
+LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+
+echo "版本: ${VERSION}"
+echo "构建时间: ${BUILD_TIME}"
+echo "Git提交: ${GIT_COMMIT}"
+
 # 创建输出目录
 mkdir -p bin
 
@@ -20,33 +32,33 @@ echo "📦 构建多平台版本..."
 
 # Linux amd64
 echo "  🐧 构建 Linux amd64..."
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-webui-linux-amd64 ./cmd/web-ui/
+GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-linux-amd64 ./cmd/web-ui/
 
 # Linux arm64
 echo "  🐧 构建 Linux arm64..."
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bin/v2ray-webui-linux-arm64 ./cmd/web-ui/
+GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-linux-arm64 ./cmd/web-ui/
 
 # Windows amd64
 echo "  🪟 构建 Windows amd64..."
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-webui-windows-amd64.exe ./cmd/web-ui/
+GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-windows-amd64.exe ./cmd/web-ui/
 
 # Windows arm64
 echo "  🪟 构建 Windows arm64..."
-GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o bin/v2ray-webui-windows-arm64.exe ./cmd/web-ui/
+GOOS=windows GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-windows-arm64.exe ./cmd/web-ui/
 
 # macOS amd64
 echo "  🍎 构建 macOS amd64..."
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/v2ray-webui-darwin-amd64 ./cmd/web-ui/
+GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-darwin-amd64 ./cmd/web-ui/
 
 # macOS arm64 (Apple Silicon)
 echo "  🍎 构建 macOS arm64..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/v2ray-webui-darwin-arm64 ./cmd/web-ui/
+GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o bin/v2ray-webui-${VERSION}-darwin-arm64 ./cmd/web-ui/
 
 echo ""
 echo "✅ 构建完成！"
 echo ""
 echo "📁 输出文件："
-ls -la bin/v2ray-webui-*
+ls -la bin/v2ray-webui-${VERSION}-*
 
 echo ""
 echo "🚀 运行方式："

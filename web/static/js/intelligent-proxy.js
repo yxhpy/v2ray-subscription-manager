@@ -238,10 +238,26 @@ class IntelligentProxyManager {
         };
     }
 
-    // 更新状态
+    // 更新状态（带健康检查回退）
     async updateStatus() {
         try {
-            const response = await fetch('/api/intelligent-proxy/status');
+            // 首先尝试快速健康检查
+            const healthOk = await this.checkHealth();
+            if (!healthOk) {
+                console.warn('健康检查失败，状态API可能存在问题');
+                this.showAlert('服务响应异常，正在尝试恢复...', 'warning');
+                return;
+            }
+            
+            // 健康检查通过后，获取详细状态
+            const response = await fetch('/api/intelligent-proxy/status', {
+                timeout: 10000 // 10秒超时
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
             const result = await response.json();
             
             if (result.success && result.data) {
@@ -250,9 +266,46 @@ class IntelligentProxyManager {
                 this.isRunning = result.data.is_running || false;
                 this.autoSwitchEnabled = result.data.config?.enable_auto_switch || false;
                 this.updateUI();
+            } else {
+                throw new Error(result.error || '状态API返回错误');
             }
         } catch (error) {
             console.error('更新状态失败:', error);
+            
+            // 如果状态API失败，尝试使用健康检查作为备用
+            const healthOk = await this.checkHealth();
+            if (healthOk) {
+                console.log('健康检查正常，状态API可能临时不可用');
+                this.showAlert('状态获取超时，服务仍在运行', 'warning');
+            } else {
+                console.error('健康检查也失败，服务可能存在问题');
+                this.showAlert('服务连接异常，请检查服务状态', 'danger');
+            }
+        }
+    }
+    
+    // 健康检查
+    async checkHealth() {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
+            
+            const response = await fetch('/api/intelligent-proxy/health', {
+                method: 'GET',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                return false;
+            }
+            
+            const result = await response.json();
+            return result.success && result.data && result.data.status === 'ok';
+        } catch (error) {
+            console.warn('健康检查失败:', error);
+            return false;
         }
     }
 
